@@ -1,48 +1,26 @@
-# ChiefKit Studio
+# ChiefKit Studio Wiki
 
-ChiefKit Studio is a native macOS SwiftUI playground for exploring three ChiefKit
-packages:
+ChiefKit Studio is a native macOS SwiftUI playground, visual builder, and on-device AI assistant for exploring and exporting code with:
 
-- SwiftState
-- NotebookFlowKit
-- SwiftBlocks
-
-The app is designed as a polished MVP for developers who want to inspect live
-examples, copy SwiftUI snippets, copy Package.swift dependency entries, and
-export example files.
+- **SwiftBlocks** (Interactive Drag-and-Drop Canvas, Theme Tokens & Liquid Glass)
+- **SwiftState** (Unidirectional Reducers, Async Effects & Floating Time-Travel Debugger)
+- **NotebookFlowKit** (JSON-Backed Onboarding, Survey & Branching Quiz Flows)
+- **CoreLocalAIKit** (100% On-Device Swift Refactoring, Accessibility Auditing & Flow Synthesis)
 
 ## Highlights
 
-- Native macOS sidebar layout
-- Live preview area
-- Code preview panel
-- Copy and export actions
-- Responsive split layout
-- Rounded ChiefKit app icon
-- macOS DMG packaging script
+- Embedded drag-and-drop `SwiftBlocks` canvas with real-time SwiftUI stack/ZStack code synthesis
+- Instant **Copy to Clipboard** + **Export as Package Snippet**
+- **CoreLocalAIKit** right-hand assistant supporting English & Turkish developer commands offline
+- **Theme & Token Explorer** with live Liquid Glass frost/specular controls
+- Draggable **State Time-Travel Debugger (`⌘T`)** with history slider and replay
+- **Preview Modes** (Light/Dark, Viewport presets, Dynamic Type, Accessibility X-Ray)
+- **Spotlight Command Palette (`⌘K`)** and **One-Click Project Generator (`⌘⇧E`)**
 
-## Build
+## Build & Test
 
 ```bash
 swift build
-```
-
-## Run
-
-```bash
+swift test
 ./script/build_and_run.sh
 ```
-
-## Package
-
-```bash
-./script/package_macos.sh
-```
-
-The generated setup is written to:
-
-```text
-dist/ChiefKit Studio Setup.dmg
-```
-
-The DMG is intentionally ignored by git.

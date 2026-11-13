@@ -1,3 +1,5 @@
+#if canImport(SwiftUI) && canImport(AppKit)
+import ChiefKitStudioCore
 import AppKit
 import SwiftUI
 
@@ -42,3 +44,4 @@ struct ChiefKitLogoView: View {
             .background(.thinMaterial)
     }
 }
+#endif

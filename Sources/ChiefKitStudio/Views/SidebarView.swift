@@ -1,3 +1,5 @@
+#if canImport(SwiftUI) && canImport(AppKit)
+import ChiefKitStudioCore
 import SwiftUI
 
 struct SidebarView: View {
@@ -9,49 +11,204 @@ struct SidebarView: View {
                 HStack(spacing: 10) {
                     ChiefKitLogoView(size: 34, cornerRadius: 8)
 
-                    Text("ChiefKit Studio")
-                        .font(.title3.weight(.semibold))
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("ChiefKit Studio")
+                            .font(.headline.weight(.bold))
+                            .lineLimit(1)
+                        Text("Playground · AI · Blueprints")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Button {
+                        viewModel.isCommandPalettePresented = true
+                    } label: {
+                        Text("⌘K")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open Command Palette (⌘K)")
                 }
 
-                Text("Interactive package playground")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                    TextField("Search packages, blueprints, APIs…", text: $viewModel.searchText)
+                        .textFieldStyle(.plain)
+                        .font(.callout)
+                    if !viewModel.searchText.isEmpty {
+                        Button {
+                            viewModel.searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(.separator.opacity(0.45), lineWidth: 1)
+                }
 
-                TextField("Search examples", text: $viewModel.searchText)
-                    .textFieldStyle(.roundedBorder)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 5) {
+                        ForEach(ExampleCategory.allCases) { category in
+                            let active = viewModel.selectedCategory == category
+                            Button {
+                                viewModel.selectedCategory = category
+                            } label: {
+                                Text(category.rawValue)
+                                    .font(.caption2.weight(active ? .bold : .medium))
+                                    .foregroundStyle(active ? .white : .primary)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        active
+                                            ? viewModel.themeTokens.primary.swiftUIColor
+                                            : Color.secondary.opacity(0.12),
+                                        in: Capsule()
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
             }
-            .padding([.horizontal, .top], 16)
-            .padding(.bottom, 10)
+            .padding([.horizontal, .top], 14)
+            .padding(.bottom, 8)
 
             List {
-                Section("Packages") {
-                    ForEach(viewModel.filteredPackages) { package in
-                        SidebarRow(
-                            title: package.title,
-                            subtitle: package.purpose,
-                            systemImage: package.symbolName,
-                            isSelected: viewModel.selection == .package(package)
-                        ) {
-                            viewModel.select(.package(package))
+                if !viewModel.filteredPinnedSnippets.isEmpty {
+                    Section("My Pinned Snippets (\(viewModel.filteredPinnedSnippets.count))") {
+                        ForEach(viewModel.filteredPinnedSnippets) { snippet in
+                            SidebarRow(
+                                title: snippet.title,
+                                subtitle: snippet.notes,
+                                badge: "Pinned",
+                                systemImage: "pin.fill",
+                                accent: viewModel.themeTokens.primary.swiftUIColor,
+                                isSelected: viewModel.selection == .savedSnippet(snippet.id)
+                            ) {
+                                viewModel.select(.savedSnippet(snippet.id))
+                            }
                         }
                     }
                 }
 
-                Section("Templates") {
-                    ForEach(viewModel.filteredTemplates) { template in
-                        SidebarRow(
-                            title: template.title,
-                            subtitle: template.summary,
-                            systemImage: template.symbolName,
-                            isSelected: viewModel.selection == .template(template)
-                        ) {
-                            viewModel.select(.template(template))
+                if !viewModel.filteredPackages.isEmpty {
+                    Section("Core Packages") {
+                        ForEach(viewModel.filteredPackages) { package in
+                            SidebarRow(
+                                title: package.title,
+                                subtitle: package.purpose,
+                                badge: package.category.rawValue,
+                                systemImage: package.symbolName,
+                                accent: viewModel.themeTokens.primary.swiftUIColor,
+                                isSelected: viewModel.selection == .package(package)
+                            ) {
+                                viewModel.select(.package(package))
+                            }
+                        }
+                    }
+                }
+
+                if !viewModel.filteredBlueprints.isEmpty {
+                    Section("Full-Stack Blueprints (\(viewModel.filteredBlueprints.count))") {
+                        ForEach(viewModel.filteredBlueprints) { blueprint in
+                            SidebarRow(
+                                title: blueprint.title,
+                                subtitle: blueprint.summary,
+                                badge: "Blueprint",
+                                systemImage: blueprint.symbolName,
+                                accent: viewModel.themeTokens.primary.swiftUIColor,
+                                isSelected: viewModel.selection == .blueprint(blueprint)
+                            ) {
+                                viewModel.select(.blueprint(blueprint))
+                            }
+                        }
+                    }
+                }
+
+                if !viewModel.filteredTemplates.isEmpty {
+                    Section("Categorized Examples (\(viewModel.filteredTemplates.count))") {
+                        ForEach(viewModel.filteredTemplates) { template in
+                            SidebarRow(
+                                title: template.title,
+                                subtitle: template.summary,
+                                badge: template.category.rawValue,
+                                systemImage: template.symbolName,
+                                accent: viewModel.themeTokens.primary.swiftUIColor,
+                                isSelected: viewModel.selection == .template(template)
+                            ) {
+                                viewModel.select(.template(template))
+                            }
                         }
                     }
                 }
             }
             .listStyle(.sidebar)
+
+            Divider()
+
+            HStack(spacing: 10) {
+                Button {
+                    viewModel.saveWorkspaceToDisk()
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Save Workspace (.chiefkit) — ⌘S")
+
+                Button {
+                    viewModel.loadWorkspaceFromDisk()
+                } label: {
+                    Image(systemName: "folder")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Open Workspace (.chiefkit) — ⌘O")
+
+                Divider()
+                    .frame(height: 12)
+
+                Button {
+                    viewModel.openInXcode()
+                } label: {
+                    Label("Xcode", systemImage: "hammer")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button {
+                    viewModel.openDMGDownload()
+                } label: {
+                    Label("DMG", systemImage: "arrow.down.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Download latest macOS DMG setup")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
         }
     }
 }
@@ -59,7 +216,9 @@ struct SidebarView: View {
 private struct SidebarRow: View {
     let title: String
     let subtitle: String
+    let badge: String
     let systemImage: String
+    let accent: Color
     let isSelected: Bool
     let action: () -> Void
 
@@ -68,13 +227,26 @@ private struct SidebarRow: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: systemImage)
                     .frame(width: 18)
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(isSelected ? accent : Color.secondary)
+                    .padding(.top, 2)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.callout.weight(isSelected ? .semibold : .regular))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .font(.callout.weight(isSelected ? .semibold : .regular))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 2)
+
+                        Text(badge)
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                    }
+
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -85,6 +257,7 @@ private struct SidebarRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .listRowBackground(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
+        .listRowBackground(isSelected ? accent.opacity(0.16) : Color.clear)
     }
 }
+#endif

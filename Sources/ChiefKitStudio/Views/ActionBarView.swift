@@ -1,3 +1,5 @@
+#if canImport(SwiftUI) && canImport(AppKit)
+import ChiefKitStudioCore
 import SwiftUI
 
 struct ActionBarView: View {
@@ -12,13 +14,13 @@ struct ActionBarView: View {
                 wrappedBar
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 9)
             .background(.bar)
         }
     }
 
     private var wideBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             statusText
             Spacer()
             actionButtons
@@ -29,34 +31,48 @@ struct ActionBarView: View {
         VStack(alignment: .leading, spacing: 8) {
             statusText
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 158), spacing: 8)], spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 148), spacing: 8)], spacing: 8) {
                 actionButtons
             }
         }
     }
 
     private var statusText: some View {
-        Text(viewModel.statusMessage)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
+        HStack(spacing: 6) {
+            Circle()
+                .fill(viewModel.themeTokens.success.swiftUIColor)
+                .frame(width: 7, height: 7)
+
+            Text(viewModel.statusMessage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
     }
 
     @ViewBuilder
     private var actionButtons: some View {
-        actionButton("Copy SwiftUI Code", systemImage: "doc.on.doc") {
+        actionButton("Copy SwiftUI", systemImage: "doc.on.doc") {
             viewModel.copySwiftUICode()
         }
 
-        actionButton("Copy Package.swift Dependency", systemImage: "shippingbox") {
-            viewModel.copyPackageDependency()
+        actionButton("Export Package Snippet", systemImage: "shippingbox") {
+            viewModel.exportPackageSnippetFile()
         }
 
-        actionButton("Export Example File", systemImage: "square.and.arrow.down") {
-            viewModel.exportSelectedExample()
+        actionButton("Generate Project", systemImage: "hammer.fill") {
+            viewModel.isProjectGeneratorPresented = true
         }
 
-        actionButton("Reset Demo", systemImage: "arrow.counterclockwise") {
+        actionButton("Open in Xcode", systemImage: "wrench.and.screwdriver") {
+            viewModel.openInXcode()
+        }
+
+        actionButton("Download DMG", systemImage: "arrow.down.circle") {
+            viewModel.openDMGDownload()
+        }
+
+        actionButton("Reset", systemImage: "arrow.counterclockwise") {
             viewModel.resetDemo()
         }
     }
@@ -64,9 +80,11 @@ struct ActionBarView: View {
     private func actionButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
+                .font(.caption.weight(.medium))
                 .lineLimit(1)
-                .minimumScaleFactor(0.82)
-                .frame(maxWidth: .infinity)
+                .minimumScaleFactor(0.84)
         }
+        .controlSize(.small)
     }
 }
+#endif

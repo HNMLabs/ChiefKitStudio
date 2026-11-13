@@ -1,196 +1,1337 @@
+#if canImport(SwiftUI) && canImport(AppKit)
+import ChiefKitStudioCore
+import CoreGraphics
 import Foundation
+import SwiftUI
 
 @MainActor
 final class PlaygroundViewModel: ObservableObject {
-    @Published var selection: NavigationSelection = .package(.swiftState)
+    // MARK: - Navigation, Blueprints & Custom Snippets
+    @Published var selection: NavigationSelection = .package(.swiftBlocks)
+    @Published var selectedCategory: ExampleCategory = .all
     @Published var searchText = ""
-    @Published var codePreviewMode: CodePreviewMode = .swiftUI
+    @Published var blueprintConfig = BlueprintConfiguration()
+    @Published var pinnedSnippets: [SavedSnippet] = []
 
+    // MARK: - Right Inspector & Code Panel
+    @Published var rightInspectorTab: RightInspectorTab = .code
+    @Published var codePreviewMode: CodePreviewMode = .swiftUI
+    @Published var tokenExportFormat: TokenExportFormat = .swiftBlocks
+    @Published var aiOverriddenCode: [NavigationSelection: String] = [:]
+    @Published var generatedUnitTestsBySelection: [NavigationSelection: String] = [:]
+
+    // MARK: - SwiftBlocks Drag-and-Drop Canvas + Undo/Redo
+    @Published var canvasDocument: CanvasDocument
+    @Published var canvasHistory = CanvasHistoryStack()
+    @Published var selectedCanvasNodeID: UUID?
+    @Published var snapCanvasToGrid = true
+    @Published var canvasLayoutMode: CanvasCodeLayoutMode = .adaptiveStacks
+    @Published var focusSelectedNodeCode = false
+    @Published var autoCraftPrompt = ""
+
+    // MARK: - Theme & Token Explorer
+    @Published var themeTokens = StudioThemeTokens()
+    @Published var activeThemePreset: StudioThemePreset = .chiefKitBlue
+
+    // MARK: - SwiftState & Time-Travel Store
     @Published var counter = 0
     @Published var isLoading = false
     @Published var loadedMessage: String?
-    @Published var timeline: [TimelineEvent] = [
-        TimelineEvent(action: ".initial", state: "count: 0", timestamp: .now)
+    @Published var cartItems: [CartDemoItem] = PlaygroundViewModel.defaultCartItems
+    @Published var promoApplied = false
+    @Published var timeline: [TimelineEvent] = []
+    @Published var stateHistory: [StateSnapshot] = []
+    @Published var currentHistoryIndex = 0
+    @Published var isTimeTravelVisible = false
+    @Published var isReplayingHistory = false
+    private var isScrubbingTimeTravel = false
+
+    // MARK: - NotebookFlowKit Runner & Visual Builder
+    @Published var flowJSON = DemoLibrary.defaultFlowJSON
+    @Published var activeFlowStepIndex = 0
+    @Published var flowAnswers: [String: String] = [:]
+
+    // MARK: - CoreLocalAIKit On-Device Assistant
+    @Published var aiPrompt = ""
+    @Published var aiBackendMode: LocalAIBackendMode = .naturalLanguageAST
+    @Published var isAIRunning = false
+    @Published var latestAIResponse: LocalAIResponse?
+    @Published var aiHistory: [LocalAIResponse] = []
+    private let aiEngine = LocalAIEngine()
+
+    // MARK: - Preview Modes, Command Palette & Sheets
+    @Published var previewConfig = PreviewConfiguration()
+    @Published var isCommandPalettePresented = false
+    @Published var commandPaletteQuery = ""
+    @Published var isProjectGeneratorPresented = false
+    @Published var statusMessage = "Ready — Drag blocks, tweak tokens, or press ⌘K"
+
+    static let defaultCartItems: [CartDemoItem] = [
+        CartDemoItem(id: "pro-seat", name: "ChiefKit Team Seat", price: 29, quantity: 2),
+        CartDemoItem(id: "ai-pack", name: "On-Device CoreML Pack", price: 19, quantity: 1)
     ]
 
-    @Published var flowJSON = DemoLibrary.defaultFlowJSON
-    @Published var selectedBlockName = "Primary Button"
-    @Published var statusMessage = "Ready"
+    init() {
+        let starterDoc = CanvasDocument.starter(radius: 12)
+        self.canvasDocument = starterDoc
+        self.selectedCanvasNodeID = starterDoc.nodes.first?.id
+
+        let initialSnapshot = StateSnapshot(
+            index: 0,
+            action: ".initial",
+            summary: "count: 0 · cart: 3 items",
+            counter: 0,
+            isLoading: false,
+            loadedMessage: nil,
+            cartItems: Self.defaultCartItems,
+            promoApplied: false,
+            activeFlowStepIndex: 0
+        )
+        self.stateHistory = [initialSnapshot]
+        self.timeline = [
+            TimelineEvent(action: ".initial", state: "count: 0")
+        ]
+    }
+
+    // MARK: - Filtered Sidebar Collections
 
     var filteredPackages: [PackageDemo] {
-        PackageDemo.allCases.filter { matches($0.title, $0.purpose) }
-    }
-
-    var filteredTemplates: [TemplateKind] {
-        TemplateKind.allCases.filter { matches($0.title, $0.summary) }
-    }
-
-    var selectedSwiftUICode: String {
-        switch selection {
-        case .package(.swiftState):
-            DemoLibrary.swiftStateCode
-        case .package(.notebookFlowKit):
-            DemoLibrary.notebookUsageCode
-        case .package(.swiftBlocks):
-            DemoLibrary.swiftBlocksCode
-        case .template(let template):
-            DemoLibrary.templateExamples[template]?.swiftUICode ?? ""
+        PackageDemo.allCases.filter { pkg in
+            let categoryMatch = selectedCategory == .all || pkg.category == selectedCategory
+            return categoryMatch && matches(pkg.title, pkg.purpose, pkg.highlightedAPIs.joined(separator: " "))
         }
     }
 
+    var filteredBlueprints: [BlueprintDomain] {
+        BlueprintDomain.allCases.filter { domain in
+            let categoryMatch = selectedCategory == .all || selectedCategory == .blueprints
+            return categoryMatch && matches(domain.title, domain.summary, domain.entityName)
+        }
+    }
+
+    var filteredTemplates: [TemplateKind] {
+        TemplateKind.allCases.filter { kind in
+            let categoryMatch = selectedCategory == .all || kind.category == selectedCategory
+            return categoryMatch && matches(kind.title, kind.summary, kind.category.rawValue)
+        }
+    }
+
+    var filteredPinnedSnippets: [SavedSnippet] {
+        pinnedSnippets.filter { snippet in
+            let categoryMatch = selectedCategory == .all || snippet.category == selectedCategory
+            return categoryMatch && matches(snippet.title, snippet.notes)
+        }
+    }
+
+    func pinnedSnippet(for id: UUID) -> SavedSnippet? {
+        pinnedSnippets.first { $0.id == id }
+    }
+
+    var selectionDisplayTitle: String {
+        if case .savedSnippet(let id) = selection, let found = pinnedSnippet(for: id) {
+            return found.title
+        }
+        return selection.title
+    }
+
+    // MARK: - What You're Learning Metadata
+
+    var currentLearningHeadline: String {
+        switch selection {
+        case .package(let pkg):
+            return pkg.learningHeadline
+        case .template(let kind):
+            return DemoLibrary.templateExample(for: kind, theme: themeTokens).explanation
+        case .blueprint(let domain):
+            return "Compose a cohesive multi-package \(domain.title) architecture uniting SwiftBlocks, SwiftState, NotebookFlowKit, and CoreLocalAIKit."
+        case .savedSnippet(let id):
+            return pinnedSnippet(for: id)?.notes ?? "Custom SwiftUI snippet saved to your ChiefKit Studio workspace."
+        }
+    }
+
+    var currentLearningPoints: [String] {
+        switch selection {
+        case .package(let pkg):
+            return pkg.learningKeyPoints
+        case .template(let kind):
+            return DemoLibrary.templateExample(for: kind, theme: themeTokens).learningPoints
+        case .blueprint:
+            return [
+                "Toggle architectural layers (UI, Store, Onboarding, Local AI, @Test) and watch code adapt live",
+                "Export the entire multi-layer blueprint with bundled tests in one click (⌘⇧E)",
+                "Save your tailored blueprint & tokens into a portable .chiefkit workspace (⌘S)"
+            ]
+        case .savedSnippet:
+            return [
+                "Edit or enhance pinned snippets using CoreLocalAIKit in the right inspector",
+                "Compare baseline vs enhanced code in the Live Diff tab",
+                "Persist pinned snippets across sessions with Save Workspace (.chiefkit)"
+            ]
+        }
+    }
+
+    var currentHighlightedAPIs: [String] {
+        switch selection {
+        case .package(let pkg):
+            return pkg.highlightedAPIs
+        case .template(let kind):
+            return DemoLibrary.templateExample(for: kind, theme: themeTokens).highlightedAPIs
+        case .blueprint:
+            return ["EDKSurface", "Reducer", "NotebookFlowView", "NLLanguageRecognizer", "@Test"]
+        case .savedSnippet:
+            return ["View", "EDKTheme", "@ScaledMetric"]
+        }
+    }
+
+    // MARK: - Live Code Generation, Diff & Quality Scorecard
+
+    var hasAIOverrideForCurrentSelection: Bool {
+        aiOverriddenCode[selection] != nil
+    }
+
+    var selectedCanvasNode: CanvasNode? {
+        guard let selectedCanvasNodeID else { return nil }
+        return canvasDocument.nodes.first { $0.id == selectedCanvasNodeID }
+    }
+
+    var baselineSwiftUICode: String {
+        switch selection {
+        case .package(.swiftBlocks):
+            return canvasDocument.generateSwiftUICode(
+                theme: themeTokens,
+                layoutMode: canvasLayoutMode,
+                focusedNodeID: selectedCanvasNodeID,
+                focusSelectedOnly: focusSelectedNodeCode
+            )
+        case .package(.swiftState):
+            return DemoLibrary.liveSwiftStateCode(
+                counter: counter,
+                isLoading: isLoading,
+                loadedMessage: loadedMessage
+            )
+        case .package(.notebookFlowKit):
+            let title = (try? FlowDefinition.decode(flowJSON).get().title) ?? "Launch Onboarding"
+            return DemoLibrary.notebookUsageCode(flowTitle: title)
+        case .package(.coreLocalAIKit):
+            return DemoLibrary.coreLocalAIKitUsageCode
+        case .template(let kind):
+            return DemoLibrary.templateExample(for: kind, theme: themeTokens).swiftUICode
+        case .blueprint(let domain):
+            return blueprintConfig.synthesizeSwiftUICode(for: domain, theme: themeTokens)
+        case .savedSnippet(let id):
+            return pinnedSnippet(for: id)?.swiftUICode ?? "// Snippet not found"
+        }
+    }
+
+    var selectedSwiftUICode: String {
+        if let overridden = aiOverriddenCode[selection] {
+            return overridden
+        }
+        if case .package(.coreLocalAIKit) = selection, let latest = latestAIResponse {
+            return latest.generatedCode
+        }
+        return baselineSwiftUICode
+    }
+
+    var selectedUnitTestsCode: String {
+        if let customTests = generatedUnitTestsBySelection[selection] {
+            return customTests
+        }
+        if case .blueprint(let domain) = selection {
+            return blueprintConfig.synthesizeSwiftTests(for: domain)
+        }
+        return """
+        import Testing
+
+        @Suite("\(selectionDisplayTitle) Verification")
+        struct GeneratedQuickTests {
+            @Test("Theme primary token satisfies WCAG contrast check")
+            func primaryTokenContrast() {
+                let ratio = \(String(format: "%.2f", themeTokens.contrastReport.primaryOnSurfaceRatio))
+                #expect(ratio >= 3.0)
+            }
+        }
+        """
+    }
+
+    var currentDiffReport: DiffReport {
+        CodeDiffEngine.diff(original: baselineSwiftUICode, updated: selectedSwiftUICode)
+    }
+
+    var currentQualityReport: CodeQualityReport {
+        CodeQualityAnalyzer.analyze(code: selectedSwiftUICode, theme: themeTokens)
+    }
+
     var selectedDependencyCode: String {
-        DemoLibrary.packageSnippet(for: selection)
+        DemoLibrary.packageSnippet(for: selection, blueprint: blueprintConfig)
     }
 
     var selectedDataPreview: String {
         switch selection {
-        case .package(.swiftState):
-            stateJSONPreview
-        case .package(.notebookFlowKit):
-            flowJSON
+        case .package(.swiftState), .template(.shoppingCartStore), .template(.apiLoadingState):
+            return stateJSONPreview
+        case .package(.notebookFlowKit), .template(.onboardingFlow), .template(.quizFlow):
+            return flowJSON
+        case .blueprint(let domain):
+            return blueprintConfig.synthesizeFlowJSON(for: domain)
         case .package(.swiftBlocks):
-            swiftBlocksGeneratedCode
-        case .template(let template):
-            DemoLibrary.templateExamples[template]?.explanation ?? template.summary
+            return canvasJSONPreview
+        case .package(.coreLocalAIKit):
+            return aiTelemetryJSONPreview
+        case .template(let kind):
+            return DemoLibrary.templateExample(for: kind, theme: themeTokens).explanation
+        case .savedSnippet(let id):
+            return pinnedSnippet(for: id)?.notes ?? "{}"
         }
     }
 
     var codePanelText: String {
         switch codePreviewMode {
         case .swiftUI:
-            selectedSwiftUICode
+            return selectedSwiftUICode
+        case .diff:
+            return currentDiffReport.unifiedPatch
+        case .tests:
+            return selectedUnitTestsCode
         case .package:
-            selectedDependencyCode
+            return selectedDependencyCode
+        case .theme:
+            return themeTokens.exportedCode(in: tokenExportFormat)
         case .data:
-            selectedDataPreview
+            return selectedDataPreview
         }
     }
 
     var stateJSONPreview: String {
-        let state: [String: Any] = [
+        let cartTotal = computedCartTotal
+        let dict: [String: Any] = [
             "count": counter,
             "isLoading": isLoading,
             "message": loadedMessage ?? NSNull(),
-            "timelineCount": timeline.count
+            "promoApplied": promoApplied,
+            "cartTotalUSD": cartTotal,
+            "cartItemCount": cartItems.reduce(0) { $0 + $1.quantity },
+            "historyStep": "\(currentHistoryIndex + 1)/\(stateHistory.count)",
+            "activeFlowStep": activeFlowStepIndex
         ]
+        return prettyJSON(dict)
+    }
 
-        guard
-            let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]),
-            let text = String(data: data, encoding: .utf8)
-        else {
-            return "{}"
+    var canvasJSONPreview: String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(canvasDocument),
+           let text = String(data: data, encoding: .utf8) {
+            return text
         }
-
-        return text
+        return "{}"
     }
 
-    var swiftBlocksGeneratedCode: String {
-        """
-        VStack(alignment: .leading, spacing: 16) {
-            BlockButton("\(selectedBlockName)", role: .primary) {
-                print("Tapped \(selectedBlockName)")
-            }
+    var aiTelemetryJSONPreview: String {
+        let dict: [String: Any] = [
+            "engine": aiBackendMode.rawValue,
+            "networkCalls": 0,
+            "appleIntelligenceCompiled": LocalAIEngine.isAppleIntelligenceCompiled,
+            "historyRuns": aiHistory.count,
+            "qualityScore": currentQualityReport.overallScore,
+            "lastDetectedLanguage": latestAIResponse?.detectedLanguage ?? "Auto (EN / TR)"
+        ]
+        return prettyJSON(dict)
+    }
 
-            BlockSurface {
-                Text("Surface")
-                Text("Reusable macOS-ready content block")
+    var computedCartSubtotal: Int {
+        cartItems.reduce(0) { $0 + ($1.price * $1.quantity) }
+    }
+
+    var computedCartTotal: Int {
+        let sub = computedCartSubtotal
+        return promoApplied ? Int((Double(sub) * 0.80).rounded()) : sub
+    }
+
+    // MARK: - Navigation Actions
+
+    func select(_ nextSelection: NavigationSelection) {
+        selection = nextSelection
+        if case .blueprint(let domain) = nextSelection {
+            blueprintConfig.domain = domain
+        }
+        statusMessage = "Showing \(selectionDisplayTitle)"
+    }
+
+    func revertAIOverride() {
+        aiOverriddenCode.removeValue(forKey: selection)
+        statusMessage = "Restored baseline \(selectionDisplayTitle) code"
+    }
+
+    // MARK: - Custom Pinned Snippets & Workspace (.chiefkit) Persistence
+
+    func pinCurrentSnippet() {
+        let title = "\(selectionDisplayTitle) #\(pinnedSnippets.count + 1)"
+        let snippet = SavedSnippet(
+            title: title,
+            notes: "Pinned from \(selectionDisplayTitle) · Quality \(currentQualityReport.overallScore)/100 (\(currentQualityReport.gradeBadge))",
+            category: selection.category == .all ? .designSystem : selection.category,
+            swiftUICode: selectedSwiftUICode
+        )
+        pinnedSnippets.insert(snippet, at: 0)
+        statusMessage = "Pinned '\(title)' to My Snippets"
+    }
+
+    func deletePinnedSnippet(_ id: UUID) {
+        pinnedSnippets.removeAll { $0.id == id }
+        if selection == .savedSnippet(id) {
+            selection = .package(.swiftBlocks)
+        }
+        statusMessage = "Removed pinned snippet"
+    }
+
+    func makeWorkspaceSnapshot() -> WorkspaceSnapshot {
+        WorkspaceSnapshot(
+            selection: selection,
+            canvasDocument: canvasDocument,
+            themeTokens: themeTokens,
+            activeThemePreset: activeThemePreset,
+            flowJSON: flowJSON,
+            counter: counter,
+            cartItems: cartItems,
+            promoApplied: promoApplied,
+            blueprintConfig: blueprintConfig,
+            pinnedSnippets: pinnedSnippets
+        )
+    }
+
+    func applyWorkspaceSnapshot(_ snapshot: WorkspaceSnapshot) {
+        selection = snapshot.selection
+        canvasDocument = snapshot.canvasDocument
+        selectedCanvasNodeID = snapshot.canvasDocument.nodes.first?.id
+        canvasHistory.clear()
+        themeTokens = snapshot.themeTokens
+        activeThemePreset = snapshot.activeThemePreset
+        flowJSON = snapshot.flowJSON
+        counter = snapshot.counter
+        cartItems = snapshot.cartItems
+        promoApplied = snapshot.promoApplied
+        blueprintConfig = snapshot.blueprintConfig
+        pinnedSnippets = snapshot.pinnedSnippets
+        clearStateHistory()
+    }
+
+    func saveWorkspaceToDisk() {
+        do {
+            if let url = try ExportService.saveWorkspace(makeWorkspaceSnapshot()) {
+                statusMessage = "Saved workspace to \(url.lastPathComponent)"
+            }
+        } catch {
+            statusMessage = "Workspace save failed: \(error.localizedDescription)"
+        }
+    }
+
+    func loadWorkspaceFromDisk() {
+        do {
+            if let loaded = try ExportService.openWorkspace() {
+                applyWorkspaceSnapshot(loaded.snapshot)
+                statusMessage = "Loaded workspace \(loaded.url.lastPathComponent)"
+            }
+        } catch {
+            statusMessage = "Workspace open failed: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - SwiftBlocks Canvas Actions + Undo/Redo + Alignment
+
+    var canUndoCanvas: Bool { canvasHistory.canUndo }
+    var canRedoCanvas: Bool { canvasHistory.canRedo }
+
+    func undoCanvas() {
+        guard let prev = canvasHistory.undo(current: canvasDocument) else { return }
+        canvasDocument = prev
+        if let id = selectedCanvasNodeID, !canvasDocument.nodes.contains(where: { $0.id == id }) {
+            selectedCanvasNodeID = canvasDocument.nodes.last?.id
+        }
+        statusMessage = "Undid canvas edit"
+    }
+
+    func redoCanvas() {
+        guard let next = canvasHistory.redo(current: canvasDocument) else { return }
+        canvasDocument = next
+        statusMessage = "Redid canvas edit"
+    }
+
+    func recordCanvasUndoCheckpoint() {
+        canvasHistory.recordBeforeMutation(canvasDocument)
+    }
+
+    func addPaletteItem(_ item: CanvasPaletteItem, at point: CGPoint? = nil) {
+        recordCanvasUndoCheckpoint()
+        var node = item.makeNode(defaultRadius: themeTokens.radiusMedium)
+        if let point {
+            let rawFrame = CanvasFrame(
+                x: Double(point.x) - node.frame.width / 2,
+                y: Double(point.y) - node.frame.height / 2,
+                width: node.frame.width,
+                height: node.frame.height
+            )
+            node.frame = snapCanvasToGrid
+                ? rawFrame.movedBy(dx: 0, dy: 0, snapToGrid: true)
+                : rawFrame
+        } else {
+            let offset = Double(canvasDocument.nodes.count % 5) * 20.0
+            node.frame.x += offset
+            node.frame.y += offset
+        }
+        canvasDocument.nodes.append(node)
+        selectedCanvasNodeID = node.id
+        statusMessage = "Added \(item.kind.paletteTitle) to canvas"
+    }
+
+    @discardableResult
+    func handleCanvasDrop(payload: String, at location: CGPoint, canvasSize: CGSize) -> Bool {
+        if payload.hasPrefix("palette:") {
+            let id = String(payload.dropFirst("palette:".count))
+            if let item = CanvasPaletteItem.library.first(where: { $0.id == id }) {
+                addPaletteItem(item, at: location)
+                if let lastID = canvasDocument.nodes.last?.id,
+                   let idx = canvasDocument.nodes.firstIndex(where: { $0.id == lastID }) {
+                    canvasDocument.nodes[idx].frame = canvasDocument.nodes[idx].frame.clamped(to: canvasSize)
+                }
+                return true
             }
         }
-        """
+        return false
     }
 
-    func select(_ selection: NavigationSelection) {
-        self.selection = selection
-        statusMessage = "Showing \(selection.title)"
+    func applyAutoCraftPreset(_ preset: CanvasAutoCraftPreset) {
+        recordCanvasUndoCheckpoint()
+        let built = preset.buildNodes(radius: themeTokens.radiusMedium)
+        canvasDocument.nodes = built
+        selectedCanvasNodeID = built.first?.id
+        aiOverriddenCode.removeValue(forKey: .package(.swiftBlocks))
+        statusMessage = "Auto-crafted '\(preset.rawValue)' (\(built.count) blocks)"
     }
+
+    func runAutoCraftFromPrompt() {
+        let text = autoCraftPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            applyAutoCraftPreset(.glassDashboard)
+            return
+        }
+        let lower = text.lowercased()
+        if lower.contains("login") || lower.contains("auth") || lower.contains("sign") || lower.contains("giriş") {
+            applyAutoCraftPreset(.authCard)
+        } else if lower.contains("onboard") || lower.contains("welcome") || lower.contains("karşılama") {
+            applyAutoCraftPreset(.onboardingStack)
+        } else if lower.contains("price") || lower.contains("upgrade") || lower.contains("pro") || lower.contains("fiyat") {
+            applyAutoCraftPreset(.pricingBanner)
+        } else {
+            recordCanvasUndoCheckpoint()
+            var custom = CanvasAutoCraftPreset.glassDashboard.buildNodes(radius: themeTokens.radiusMedium)
+            if !custom.isEmpty {
+                custom[0].title = String(text.prefix(34))
+            }
+            canvasDocument.nodes = custom
+            selectedCanvasNodeID = custom.first?.id
+            statusMessage = "Crafted layout for \"\(text)\""
+        }
+    }
+
+    func selectCanvasNode(_ id: UUID?) {
+        selectedCanvasNodeID = id
+        if let node = selectedCanvasNode {
+            statusMessage = "Selected \(node.kind.paletteTitle): \"\(node.title)\""
+        }
+    }
+
+    func updateCanvasNodeFrame(id: UUID, frame: CanvasFrame) {
+        guard let index = canvasDocument.nodes.firstIndex(where: { $0.id == id }),
+              !canvasDocument.nodes[index].isLocked else { return }
+        canvasDocument.nodes[index].frame = frame
+    }
+
+    func updateSelectedCanvasNode(_ mutate: (inout CanvasNode) -> Void) {
+        guard let id = selectedCanvasNodeID,
+              let index = canvasDocument.nodes.firstIndex(where: { $0.id == id }) else { return }
+        recordCanvasUndoCheckpoint()
+        mutate(&canvasDocument.nodes[index])
+    }
+
+    func alignSelectedCanvasNode(_ axis: CanvasAlignmentAxis, canvasSize: CGSize) {
+        guard let id = selectedCanvasNodeID else { return }
+        recordCanvasUndoCheckpoint()
+        canvasDocument.alignNode(id: id, axis: axis, canvasSize: canvasSize)
+        statusMessage = "Aligned selected block (\(axis.rawValue))"
+    }
+
+    func autoTidyCanvas(maxWidth: Double = 640) {
+        guard !canvasDocument.nodes.isEmpty else { return }
+        recordCanvasUndoCheckpoint()
+        canvasDocument.autoTidyGrid(maxWidth: maxWidth, spacing: Double(themeTokens.spacingMD))
+        statusMessage = "Auto-tidied \(canvasDocument.nodes.count) blocks to responsive grid"
+    }
+
+    func toggleLockSelectedCanvasNode() {
+        guard let id = selectedCanvasNodeID,
+              let idx = canvasDocument.nodes.firstIndex(where: { $0.id == id }) else { return }
+        recordCanvasUndoCheckpoint()
+        canvasDocument.nodes[idx].isLocked.toggle()
+        let locked = canvasDocument.nodes[idx].isLocked
+        statusMessage = locked ? "Locked block position" : "Unlocked block position"
+    }
+
+    func duplicateSelectedCanvasNode() {
+        guard let node = selectedCanvasNode else { return }
+        recordCanvasUndoCheckpoint()
+        var copy = node
+        copy.id = UUID()
+        copy.isLocked = false
+        copy.frame = copy.frame.movedBy(dx: 24, dy: 24, snapToGrid: snapCanvasToGrid)
+        canvasDocument.nodes.append(copy)
+        selectedCanvasNodeID = copy.id
+        statusMessage = "Duplicated \(node.kind.paletteTitle)"
+    }
+
+    func bringSelectedNodeToFront() {
+        guard let id = selectedCanvasNodeID else { return }
+        recordCanvasUndoCheckpoint()
+        canvasDocument.moveLayer(id: id, direction: 1)
+        statusMessage = "Moved block forward"
+    }
+
+    func sendSelectedNodeBackward() {
+        guard let id = selectedCanvasNodeID else { return }
+        recordCanvasUndoCheckpoint()
+        canvasDocument.moveLayer(id: id, direction: -1)
+        statusMessage = "Moved block backward"
+    }
+
+    func deleteSelectedCanvasNode() {
+        guard let id = selectedCanvasNodeID else { return }
+        recordCanvasUndoCheckpoint()
+        canvasDocument.nodes.removeAll { $0.id == id }
+        selectedCanvasNodeID = canvasDocument.nodes.last?.id
+        statusMessage = "Removed selected block"
+    }
+
+    func clearCanvas() {
+        recordCanvasUndoCheckpoint()
+        canvasDocument.nodes.removeAll()
+        selectedCanvasNodeID = nil
+        statusMessage = "Cleared SwiftBlocks canvas"
+    }
+
+    // MARK: - Theme & Token Explorer + WCAG Auto-Fix
+
+    func applyThemePreset(_ preset: StudioThemePreset) {
+        activeThemePreset = preset
+        themeTokens = preset.tokens
+        for idx in canvasDocument.nodes.indices where canvasDocument.nodes[idx].kind != .badge {
+            canvasDocument.nodes[idx].cornerRadius = preset.tokens.radiusMedium
+        }
+        statusMessage = "Applied '\(preset.rawValue)' design tokens"
+    }
+
+    func autoFixThemeContrast() {
+        themeTokens.autoFixPrimaryContrast()
+        let ratio = String(format: "%.2f", themeTokens.contrastReport.primaryOnSurfaceRatio)
+        statusMessage = "Auto-adjusted Primary Accent to \(themeTokens.primary.hexString) (\(ratio):1 WCAG AA)"
+    }
+
+    // MARK: - SwiftState & Time-Travel Actions
 
     func incrementCounter() {
         counter += 1
-        appendTimeline(action: ".increment")
+        recordStateMutation(action: ".increment")
     }
 
     func decrementCounter() {
         counter -= 1
-        appendTimeline(action: ".decrement")
+        recordStateMutation(action: ".decrement")
+    }
+
+    func addCounterStep(_ delta: Int) {
+        counter += delta
+        recordStateMutation(action: delta >= 0 ? ".add(\(delta))" : ".subtract(\(abs(delta)))")
     }
 
     func runAsyncSimulation() {
         guard !isLoading else { return }
         isLoading = true
         loadedMessage = nil
-        appendTimeline(action: ".loadButtonTapped")
+        recordStateMutation(action: ".loadButtonTapped")
 
         Task {
-            try? await Task.sleep(for: .milliseconds(950))
-            loadedMessage = "Loaded demo payload at \(Date.now.formatted(date: .omitted, time: .standard))"
+            try? await Task.sleep(for: .milliseconds(850))
+            loadedMessage = "Payload #\(counter) synced at \(TimestampClockFormatting.hmsString(from: Date()))"
             isLoading = false
-            appendTimeline(action: ".responseReceived")
+            recordStateMutation(action: ".responseReceived")
         }
     }
+
+    func adjustCartQuantity(itemID: String, delta: Int) {
+        guard let idx = cartItems.firstIndex(where: { $0.id == itemID }) else { return }
+        let nextQty = max(0, min(20, cartItems[idx].quantity + delta))
+        cartItems[idx].quantity = nextQty
+        recordStateMutation(action: ".cartQty(\"\(itemID)\", \(nextQty))")
+    }
+
+    func togglePromoCode() {
+        promoApplied.toggle()
+        recordStateMutation(action: promoApplied ? ".applyPromo(\"CHIEF20\")" : ".removePromo")
+    }
+
+    var canUndoHistory: Bool {
+        currentHistoryIndex > 0
+    }
+
+    var canRedoHistory: Bool {
+        currentHistoryIndex < stateHistory.count - 1
+    }
+
+    func undoHistory() {
+        guard canUndoHistory else { return }
+        scrubHistory(to: currentHistoryIndex - 1)
+    }
+
+    func redoHistory() {
+        guard canRedoHistory else { return }
+        scrubHistory(to: currentHistoryIndex + 1)
+    }
+
+    func scrubHistory(to index: Int) {
+        guard stateHistory.indices.contains(index) else { return }
+        isScrubbingTimeTravel = true
+        let snap = stateHistory[index]
+        counter = snap.counter
+        isLoading = snap.isLoading
+        loadedMessage = snap.loadedMessage
+        cartItems = snap.cartItems
+        promoApplied = snap.promoApplied
+        activeFlowStepIndex = snap.activeFlowStepIndex
+        currentHistoryIndex = index
+        isScrubbingTimeTravel = false
+        statusMessage = "Time-Travel → Step \(index + 1)/\(stateHistory.count) (\(snap.action))"
+    }
+
+    func replayHistory() {
+        guard !isReplayingHistory, stateHistory.count > 1 else { return }
+        isReplayingHistory = true
+        scrubHistory(to: 0)
+
+        Task {
+            for step in 1..<stateHistory.count {
+                try? await Task.sleep(for: .milliseconds(360))
+                if !isReplayingHistory { break }
+                scrubHistory(to: step)
+            }
+            isReplayingHistory = false
+            statusMessage = "Finished replaying \(stateHistory.count) state transitions"
+        }
+    }
+
+    func clearStateHistory() {
+        let base = StateSnapshot(
+            index: 0,
+            action: ".baseline",
+            summary: "count: \(counter) · total: $\(computedCartTotal)",
+            counter: counter,
+            isLoading: isLoading,
+            loadedMessage: loadedMessage,
+            cartItems: cartItems,
+            promoApplied: promoApplied,
+            activeFlowStepIndex: activeFlowStepIndex
+        )
+        stateHistory = [base]
+        currentHistoryIndex = 0
+        statusMessage = "Cleared time-travel history"
+    }
+
+    private func recordStateMutation(action: String) {
+        guard !isScrubbingTimeTravel else { return }
+
+        if currentHistoryIndex < stateHistory.count - 1 {
+            stateHistory.removeSubrange((currentHistoryIndex + 1)...)
+        }
+
+        let summary = "count: \(counter) · $\(computedCartTotal)"
+        let nextIndex = stateHistory.count
+        let snapshot = StateSnapshot(
+            index: nextIndex,
+            action: action,
+            summary: summary,
+            counter: counter,
+            isLoading: isLoading,
+            loadedMessage: loadedMessage,
+            cartItems: cartItems,
+            promoApplied: promoApplied,
+            activeFlowStepIndex: activeFlowStepIndex
+        )
+
+        stateHistory.append(snapshot)
+        if stateHistory.count > 50 {
+            stateHistory.removeFirst()
+            stateHistory = stateHistory.enumerated().map { idx, item in
+                StateSnapshot(
+                    id: item.id,
+                    index: idx,
+                    action: item.action,
+                    summary: item.summary,
+                    timestamp: item.timestamp,
+                    counter: item.counter,
+                    isLoading: item.isLoading,
+                    loadedMessage: item.loadedMessage,
+                    cartItems: item.cartItems,
+                    promoApplied: item.promoApplied,
+                    activeFlowStepIndex: item.activeFlowStepIndex
+                )
+            }
+        }
+        currentHistoryIndex = stateHistory.count - 1
+
+        timeline.insert(
+            TimelineEvent(action: action, state: summary),
+            at: 0
+        )
+        if timeline.count > 12 {
+            timeline.removeLast()
+        }
+    }
+
+    // MARK: - NotebookFlowKit Interactive Stepper & Visual Screen Builder
+
+    func advanceFlow(action: String, pageID: String, totalPages: Int) {
+        flowAnswers[pageID] = action
+        if activeFlowStepIndex < max(0, totalPages - 1) {
+            activeFlowStepIndex += 1
+        } else {
+            activeFlowStepIndex = 0
+        }
+        recordStateMutation(action: ".flowAction(\"\(action)\")")
+        statusMessage = "Flow answer '\(action)' recorded"
+    }
+
+    func restartFlow() {
+        activeFlowStepIndex = 0
+        flowAnswers.removeAll()
+        recordStateMutation(action: ".flowRestart")
+        statusMessage = "Restarted NotebookFlow preview"
+    }
+
+    func mutateFlowDefinition(_ transform: (inout FlowDefinition) -> Void) {
+        guard var def = try? FlowDefinition.decode(flowJSON).get() else { return }
+        transform(&def)
+        flowJSON = def.encodedPrettyJSON()
+    }
+
+    func addVisualFlowPage() {
+        mutateFlowDefinition { def in
+            let idx = def.pages.count + 1
+            def.pages.append(
+                FlowPage(
+                    id: "step_\(idx)",
+                    title: "New Step \(idx)",
+                    body: "Describe what the user learns or configures on this screen.",
+                    style: idx == 1 ? "hero" : "choice",
+                    actions: ["Continue"]
+                )
+            )
+        }
+        statusMessage = "Added screen to NotebookFlow"
+    }
+
+    func removeVisualFlowPage(at index: Int) {
+        mutateFlowDefinition { def in
+            guard def.pages.count > 1, def.pages.indices.contains(index) else { return }
+            def.pages.remove(at: index)
+        }
+        activeFlowStepIndex = max(0, activeFlowStepIndex - 1)
+        statusMessage = "Removed screen from NotebookFlow"
+    }
+
+    func moveVisualFlowPage(at index: Int, direction: Int) {
+        mutateFlowDefinition { def in
+            let target = index + direction
+            guard def.pages.indices.contains(index), def.pages.indices.contains(target) else { return }
+            def.pages.swapAt(index, target)
+        }
+        statusMessage = "Reordered NotebookFlow screen"
+    }
+
+    // MARK: - CoreLocalAIKit Assistant Actions
+
+    func runLocalAI(preset: LocalAIPromptPreset? = nil) {
+        guard !isAIRunning else { return }
+        if let preset {
+            aiPrompt = preset.promptText
+        }
+
+        rightInspectorTab = .assistant
+        isAIRunning = true
+        let promptToRun = aiPrompt
+        let preferredKind = preset?.kind
+        let backend = aiBackendMode
+        let codeSnapshot = selectedSwiftUICode
+        let titleSnapshot = selectionDisplayTitle
+        let tokensSnapshot = themeTokens
+
+        Task {
+            let response = await aiEngine.run(
+                prompt: promptToRun,
+                preferredTask: preferredKind,
+                backend: backend,
+                currentCode: codeSnapshot,
+                selectionTitle: titleSnapshot,
+                theme: tokensSnapshot
+            )
+            latestAIResponse = response
+            aiHistory.insert(response, at: 0)
+            if aiHistory.count > 15 {
+                aiHistory.removeLast()
+            }
+            isAIRunning = false
+            statusMessage = "CoreLocalAIKit completed in \(String(format: "%.1f", response.latencyMilliseconds)) ms (On-Device)"
+        }
+    }
+
+    func applyAIResponse(_ response: LocalAIResponse) {
+        guard let payload = response.applyPayload else { return }
+        switch payload {
+        case .swiftUICode(let code):
+            aiOverriddenCode[selection] = code
+            rightInspectorTab = .code
+            codePreviewMode = .diff
+            statusMessage = "Applied CoreLocalAIKit code (\(response.diffReport.summaryBadge) lines)"
+
+        case .notebookFlowJSON(let newJSON, _):
+            flowJSON = newJSON
+            activeFlowStepIndex = 0
+            flowAnswers.removeAll()
+            selection = .package(.notebookFlowKit)
+            rightInspectorTab = .code
+            codePreviewMode = .data
+            statusMessage = "Loaded AI-generated Onboarding Flow into NotebookFlowKit"
+
+        case .canvasNodes(let nodes):
+            recordCanvasUndoCheckpoint()
+            canvasDocument.nodes = nodes
+            selectedCanvasNodeID = nodes.first?.id
+            selection = .package(.swiftBlocks)
+            rightInspectorTab = .code
+            codePreviewMode = .swiftUI
+            statusMessage = "Placed \(nodes.count) AI-composed blocks onto SwiftBlocks Canvas"
+
+        case .unitTestSuite(let testCode):
+            generatedUnitTestsBySelection[selection] = testCode
+            rightInspectorTab = .code
+            codePreviewMode = .tests
+            statusMessage = "Loaded generated @Test suite into Live Code → Tests"
+        }
+    }
+
+    func runStudioSelfCheck() {
+        Task {
+            let report = await StudioSelfCheckRunner.runAll()
+            statusMessage = "Self-Check: \(report.passedCount)/\(report.steps.count) subsystems passed in \(String(format: "%.1f", report.durationMilliseconds)) ms"
+        }
+    }
+
+    // MARK: - Reset & Export Actions
 
     func resetDemo() {
         counter = 0
         isLoading = false
         loadedMessage = nil
-        timeline = [TimelineEvent(action: ".reset", state: "count: 0", timestamp: .now)]
+        cartItems = Self.defaultCartItems
+        promoApplied = false
         flowJSON = DemoLibrary.defaultFlowJSON
-        selectedBlockName = "Primary Button"
-        statusMessage = "Demo reset"
+        activeFlowStepIndex = 0
+        flowAnswers.removeAll()
+        themeTokens = StudioThemeTokens()
+        activeThemePreset = .chiefKitBlue
+        let starter = CanvasDocument.starter(radius: 12)
+        canvasDocument = starter
+        canvasHistory.clear()
+        selectedCanvasNodeID = starter.nodes.first?.id
+        aiOverriddenCode.removeAll()
+        clearStateHistory()
+        timeline = [TimelineEvent(action: ".reset", state: "count: 0")]
+        statusMessage = "Workspace reset to defaults"
     }
 
     func copySwiftUICode() {
         ExportService.copyToClipboard(selectedSwiftUICode)
-        statusMessage = "Copied SwiftUI code"
+        statusMessage = "Copied live SwiftUI code to clipboard"
     }
 
     func copyPackageDependency() {
         ExportService.copyToClipboard(selectedDependencyCode)
-        statusMessage = "Copied Package.swift dependency"
+        statusMessage = "Copied Package.swift dependency snippet"
+    }
+
+    func copyPackageSnippetBundle() {
+        let bundle = ExportService.buildPackageSnippetBundle(
+            title: selectionDisplayTitle,
+            dependencySnippet: selectedDependencyCode,
+            themeSnippet: themeTokens.swiftBlocksThemeSnippet,
+            swiftUICode: selectedSwiftUICode
+        )
+        ExportService.copyToClipboard(bundle)
+        statusMessage = "Copied self-contained Package Snippet to clipboard"
+    }
+
+    func exportPackageSnippetFile() {
+        let bundle = ExportService.buildPackageSnippetBundle(
+            title: selectionDisplayTitle,
+            dependencySnippet: selectedDependencyCode,
+            themeSnippet: themeTokens.swiftBlocksThemeSnippet,
+            swiftUICode: selectedSwiftUICode
+        )
+        let cleanName = selectionDisplayTitle.replacingOccurrences(of: " ", with: "")
+        do {
+            let url = try ExportService.export(
+                text: bundle,
+                suggestedFileName: "\(cleanName)Snippet.swift",
+                panelTitle: "Export as Package Snippet"
+            )
+            statusMessage = url == nil ? "Snippet export cancelled" : "Exported \(cleanName)Snippet.swift"
+        } catch {
+            statusMessage = "Export failed: \(error.localizedDescription)"
+        }
     }
 
     func copyNotebookUsageCode() {
-        ExportService.copyToClipboard(DemoLibrary.notebookUsageCode)
-        statusMessage = "Copied NotebookFlowKit usage"
+        let title = (try? FlowDefinition.decode(flowJSON).get().title) ?? "Launch Onboarding"
+        ExportService.copyToClipboard(DemoLibrary.notebookUsageCode(flowTitle: title))
+        statusMessage = "Copied NotebookFlowKit host SwiftUI"
     }
 
     func exportFlowJSON() {
-        Task {
-            do {
-                let url = try ExportService.export(text: flowJSON, suggestedFileName: "NotebookFlow.json")
-                statusMessage = url == nil ? "Export cancelled" : "Exported NotebookFlow.json"
-            } catch {
-                statusMessage = "Export failed: \(error.localizedDescription)"
-            }
+        do {
+            let url = try ExportService.export(
+                text: flowJSON,
+                suggestedFileName: "NotebookFlow.json",
+                panelTitle: "Export NotebookFlow JSON"
+            )
+            statusMessage = url == nil ? "Export cancelled" : "Exported NotebookFlow.json"
+        } catch {
+            statusMessage = "Export failed: \(error.localizedDescription)"
         }
     }
 
     func exportSelectedExample() {
-        Task {
-            do {
-                let fileName = "\(selection.title.replacingOccurrences(of: " ", with: "")).swift"
-                let url = try ExportService.export(text: selectedSwiftUICode, suggestedFileName: fileName)
-                statusMessage = url == nil ? "Export cancelled" : "Exported \(fileName)"
-            } catch {
-                statusMessage = "Export failed: \(error.localizedDescription)"
-            }
+        let fileName = "\(selectionDisplayTitle.replacingOccurrences(of: " ", with: "")).swift"
+        do {
+            let url = try ExportService.export(
+                text: selectedSwiftUICode,
+                suggestedFileName: fileName,
+                panelTitle: "Export SwiftUI View"
+            )
+            statusMessage = url == nil ? "Export cancelled" : "Exported \(fileName)"
+        } catch {
+            statusMessage = "Export failed: \(error.localizedDescription)"
         }
     }
 
-    private func appendTimeline(action: String) {
-        timeline.insert(
-            TimelineEvent(action: action, state: "count: \(counter)", timestamp: .now),
-            at: 0
-        )
+    func openInXcode() {
+        statusMessage = ExportService.openWorkspaceInXcode()
+    }
 
-        if timeline.count > 8 {
-            timeline.removeLast()
+    func openDMGDownload() {
+        ExportService.openURL(ExportService.dmgDownloadURLString)
+        statusMessage = "Opened macOS DMG download page in browser"
+    }
+
+    // MARK: - Command Palette (⌘K)
+
+    var allCommandItems: [CommandPaletteItem] {
+        var items: [CommandPaletteItem] = []
+
+        for pkg in PackageDemo.allCases {
+            items.append(
+                CommandPaletteItem(
+                    id: "nav-pkg-\(pkg.rawValue)",
+                    title: "Open \(pkg.title) Playground",
+                    subtitle: pkg.purpose,
+                    symbolName: pkg.symbolName,
+                    shortcutHint: nil,
+                    section: .navigation,
+                    action: .navigate(.package(pkg))
+                )
+            )
+        }
+
+        for bp in BlueprintDomain.allCases {
+            items.append(
+                CommandPaletteItem(
+                    id: "nav-bp-\(bp.rawValue)",
+                    title: "Blueprint: \(bp.title)",
+                    subtitle: bp.summary,
+                    symbolName: bp.symbolName,
+                    shortcutHint: "Full-Stack",
+                    section: .navigation,
+                    action: .navigate(.blueprint(bp))
+                )
+            )
+        }
+
+        for tpl in TemplateKind.allCases {
+            items.append(
+                CommandPaletteItem(
+                    id: "nav-tpl-\(tpl.rawValue)",
+                    title: "Example: \(tpl.title)",
+                    subtitle: "\(tpl.category.rawValue) — \(tpl.summary)",
+                    symbolName: tpl.symbolName,
+                    shortcutHint: nil,
+                    section: .navigation,
+                    action: .navigate(.template(tpl))
+                )
+            )
+        }
+
+        for preset in LocalAIPromptPreset.presets {
+            items.append(
+                CommandPaletteItem(
+                    id: "ai-\(preset.id)",
+                    title: "CoreLocalAIKit: \(preset.buttonTitle)",
+                    subtitle: "\(preset.promptText) (\(preset.turkishHint))",
+                    symbolName: preset.kind.symbolName,
+                    shortcutHint: "On-Device",
+                    section: .localAI,
+                    action: .runAIPreset(preset.kind)
+                )
+            )
+        }
+
+        items.append(contentsOf: [
+            CommandPaletteItem(
+                id: "ws-undo",
+                title: "Undo Canvas Change",
+                subtitle: "Revert last SwiftBlocks canvas block edit",
+                symbolName: "arrow.uturn.backward",
+                shortcutHint: "⌘Z",
+                section: .workspace,
+                action: .undoCanvas
+            ),
+            CommandPaletteItem(
+                id: "ws-redo",
+                title: "Redo Canvas Change",
+                subtitle: "Reapply undone SwiftBlocks canvas edit",
+                symbolName: "arrow.uturn.forward",
+                shortcutHint: "⇧⌘Z",
+                section: .workspace,
+                action: .redoCanvas
+            ),
+            CommandPaletteItem(
+                id: "ws-contrast",
+                title: "Auto-Fix Token WCAG Contrast",
+                subtitle: "Ensure Primary Accent meets ≥ 4.5:1 WCAG AA against surface",
+                symbolName: "wand.and.rays",
+                shortcutHint: "WCAG AA",
+                section: .workspace,
+                action: .autoFixContrast
+            ),
+            CommandPaletteItem(
+                id: "ws-tokens",
+                title: "Open Theme & Token Explorer",
+                subtitle: "Customize colors, spacing, corner radius, Liquid Glass, and W3C JSON",
+                symbolName: "slider.horizontal.3",
+                shortcutHint: nil,
+                section: .workspace,
+                action: .openInspectorTab(.tokens)
+            ),
+            CommandPaletteItem(
+                id: "ws-timetravel",
+                title: "Toggle State Time-Travel Debugger",
+                subtitle: "Scrub backward and forward through recorded state transitions",
+                symbolName: "clock.arrow.circlepath",
+                shortcutHint: "⌘T",
+                section: .workspace,
+                action: .toggleTimeTravel
+            ),
+            CommandPaletteItem(
+                id: "ws-dark",
+                title: "Toggle Light / Dark Preview Appearance",
+                subtitle: "Switch active preview color scheme immediately",
+                symbolName: "moon.stars.fill",
+                shortcutHint: nil,
+                section: .workspace,
+                action: .toggleDarkAppearance
+            ),
+            CommandPaletteItem(
+                id: "ws-ax",
+                title: "Toggle Accessibility X-Ray Overlay",
+                subtitle: "Inspect VoiceOver labels, focus badges, and contrast ratios",
+                symbolName: "figure.roll",
+                shortcutHint: nil,
+                section: .workspace,
+                action: .toggleAccessibilityOverlay
+            ),
+            CommandPaletteItem(
+                id: "ws-glass",
+                title: "Toggle Liquid Glass Surface Effect",
+                subtitle: "Enable or disable specular frosted glass on SwiftBlocks surfaces",
+                symbolName: "sparkles",
+                shortcutHint: nil,
+                section: .workspace,
+                action: .toggleLiquidGlass
+            ),
+            CommandPaletteItem(
+                id: "ws-selfcheck",
+                title: "Run Studio Self-Check Diagnostics",
+                subtitle: "Verify Canvas, WCAG Tokens, Flow Graph, Time-Travel, Local AI & Exporter",
+                symbolName: "checkmark.shield.fill",
+                shortcutHint: nil,
+                section: .workspace,
+                action: .runSelfCheck
+            ),
+            CommandPaletteItem(
+                id: "exp-pin",
+                title: "Pin Current Design to My Snippets",
+                subtitle: "Save active SwiftUI source into sidebar custom snippets",
+                symbolName: "pin.fill",
+                shortcutHint: "⌘D",
+                section: .export,
+                action: .pinCurrentSnippet
+            ),
+            CommandPaletteItem(
+                id: "exp-save-ws",
+                title: "Save Workspace (.chiefkit)…",
+                subtitle: "Persist canvas, theme tokens, flow JSON, blueprints & snippets",
+                symbolName: "externaldrive.badge.checkmark",
+                shortcutHint: "⌘S",
+                section: .export,
+                action: .saveWorkspace
+            ),
+            CommandPaletteItem(
+                id: "exp-load-ws",
+                title: "Open Workspace (.chiefkit)…",
+                subtitle: "Restore a previously saved ChiefKit Studio session",
+                symbolName: "folder",
+                shortcutHint: "⌘O",
+                section: .export,
+                action: .loadWorkspace
+            ),
+            CommandPaletteItem(
+                id: "exp-proj",
+                title: "One-Click Project Generator…",
+                subtitle: "Export ready-to-run Package.swift + unit tests and open in Xcode",
+                symbolName: "hammer.fill",
+                shortcutHint: "⌘⇧E",
+                section: .export,
+                action: .openProjectGenerator
+            ),
+            CommandPaletteItem(
+                id: "exp-copy",
+                title: "Copy Live SwiftUI Code",
+                subtitle: "Copy current SwiftUI source to macOS clipboard",
+                symbolName: "doc.on.doc",
+                shortcutHint: "⌘⇧C",
+                section: .export,
+                action: .copySwiftUICode
+            ),
+            CommandPaletteItem(
+                id: "exp-snippet",
+                title: "Export as Package Snippet…",
+                subtitle: "Save SwiftUI view + Package.swift dependency + EDKTheme tokens",
+                symbolName: "shippingbox.and.arrow.backward",
+                shortcutHint: nil,
+                section: .export,
+                action: .exportPackageSnippet
+            ),
+            CommandPaletteItem(
+                id: "exp-xcode",
+                title: "Open Workspace in Xcode",
+                subtitle: "Launch Xcode directly with Package.swift",
+                symbolName: "wrench.and.screwdriver.fill",
+                shortcutHint: nil,
+                section: .export,
+                action: .openInXcode
+            ),
+            CommandPaletteItem(
+                id: "exp-reset",
+                title: "Reset Playground State & Canvas",
+                subtitle: "Restore default tokens, canvas blocks, and state history",
+                symbolName: "arrow.counterclockwise",
+                shortcutHint: nil,
+                section: .export,
+                action: .resetPlayground
+            )
+        ])
+
+        return items
+    }
+
+    var filteredCommandItems: [CommandPaletteItem] {
+        let q = commandPaletteQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return allCommandItems }
+        return allCommandItems.filter {
+            $0.title.localizedCaseInsensitiveContains(q)
+                || $0.subtitle.localizedCaseInsensitiveContains(q)
+                || $0.section.rawValue.localizedCaseInsensitiveContains(q)
         }
     }
 
-    private func matches(_ title: String, _ details: String) -> Bool {
+    func executeCommand(_ item: CommandPaletteItem) {
+        isCommandPalettePresented = false
+        commandPaletteQuery = ""
+
+        switch item.action {
+        case .navigate(let target):
+            select(target)
+        case .runAIPreset(let kind):
+            let preset = LocalAIPromptPreset.presets.first { $0.kind == kind }
+            runLocalAI(preset: preset)
+        case .openInspectorTab(let tab):
+            rightInspectorTab = tab
+        case .toggleTimeTravel:
+            isTimeTravelVisible.toggle()
+        case .toggleDarkAppearance:
+            previewConfig.appearance = previewConfig.appearance == .dark ? .light : .dark
+        case .toggleAccessibilityOverlay:
+            previewConfig.showAccessibilityOverlay.toggle()
+        case .toggleLiquidGlass:
+            themeTokens.isLiquidGlassEnabled.toggle()
+        case .autoFixContrast:
+            autoFixThemeContrast()
+        case .undoCanvas:
+            undoCanvas()
+        case .redoCanvas:
+            redoCanvas()
+        case .pinCurrentSnippet:
+            pinCurrentSnippet()
+        case .saveWorkspace:
+            saveWorkspaceToDisk()
+        case .loadWorkspace:
+            loadWorkspaceFromDisk()
+        case .runSelfCheck:
+            runStudioSelfCheck()
+        case .openProjectGenerator:
+            isProjectGeneratorPresented = true
+        case .copySwiftUICode:
+            copySwiftUICode()
+        case .exportPackageSnippet:
+            exportPackageSnippetFile()
+        case .openInXcode:
+            openInXcode()
+        case .resetPlayground:
+            resetDemo()
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func matches(_ fields: String...) -> Bool {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return true }
-        return title.localizedCaseInsensitiveContains(query)
-            || details.localizedCaseInsensitiveContains(query)
+        return fields.contains { $0.localizedCaseInsensitiveContains(query) }
+    }
+
+    private func prettyJSON(_ dictionary: [String: Any]) -> String {
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: dictionary, options: [.prettyPrinted, .sortedKeys]),
+            let text = String(data: data, encoding: .utf8)
+        else {
+            return "{}"
+        }
+        return text
     }
 }
+#endif

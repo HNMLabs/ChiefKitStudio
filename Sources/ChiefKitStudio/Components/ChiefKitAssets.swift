@@ -1,3 +1,5 @@
+#if canImport(SwiftUI) && canImport(AppKit)
+import ChiefKitStudioCore
 import AppKit
 import Foundation
 
@@ -25,3 +27,4 @@ enum ChiefKitAssets {
         return nil
     }
 }
+#endif

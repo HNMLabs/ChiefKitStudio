@@ -1,6 +1,6 @@
 import Foundation
 
-extension String {
+public extension String {
     func indented(by spaces: Int) -> String {
         let padding = String(repeating: " ", count: spaces)
         return split(separator: "\n", omittingEmptySubsequences: false)
