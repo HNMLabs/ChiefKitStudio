@@ -1,4 +1,8 @@
 #if canImport(SwiftUI) && canImport(AppKit)
+import ChiefKitAST
+import ChiefKitBlueprints
+import ChiefKitDesignSystem
+import ChiefKitSecurity
 import ChiefKitStudioCore
 import CoreGraphics
 import Foundation
@@ -11,6 +15,7 @@ final class PlaygroundViewModel: ObservableObject {
     @Published var selectedCategory: ExampleCategory = .all
     @Published var searchText = ""
     @Published var blueprintConfig = BlueprintConfiguration()
+    @Published var activeEnterpriseLayers: Set<EnterpriseLayerKind> = Set(EnterpriseLayerKind.allCases)
     @Published var pinnedSnippets: [SavedSnippet] = []
 
     // MARK: - Right Inspector & Code Panel
@@ -64,7 +69,7 @@ final class PlaygroundViewModel: ObservableObject {
     @Published var isCommandPalettePresented = false
     @Published var commandPaletteQuery = ""
     @Published var isProjectGeneratorPresented = false
-    @Published var statusMessage = "Ready — Drag blocks, tweak tokens, or press ⌘K"
+    @Published var statusMessage = "Ready — Explore 8 Studio 3.0 Workbenches, 28 Enterprise Blueprints, or press ⌘K"
 
     static let defaultCartItems: [CartDemoItem] = [
         CartDemoItem(id: "pro-seat", name: "ChiefKit Team Seat", price: 29, quantity: 2),
@@ -93,12 +98,51 @@ final class PlaygroundViewModel: ObservableObject {
         ]
     }
 
+    // MARK: - Enterprise Blueprint Layer Controls
+
+    var orderedEnterpriseLayers: [EnterpriseLayerKind] {
+        let ordered = EnterpriseLayerKind.allCases.filter { activeEnterpriseLayers.contains($0) }
+        return ordered.isEmpty ? [.swiftBlocksUI] : ordered
+    }
+
+    func toggleEnterpriseLayer(_ layer: EnterpriseLayerKind) {
+        if activeEnterpriseLayers.contains(layer) {
+            if activeEnterpriseLayers.count > 1 {
+                activeEnterpriseLayers.remove(layer)
+            }
+        } else {
+            activeEnterpriseLayers.insert(layer)
+        }
+        statusMessage = "Enterprise Blueprint layers: \(orderedEnterpriseLayers.count)/\(EnterpriseLayerKind.allCases.count) active"
+    }
+
     // MARK: - Filtered Sidebar Collections
+
+    var filteredWorkbenches: [StudioWorkbenchKind] {
+        StudioWorkbenchKind.allCases.filter { wb in
+            let categoryMatch = selectedCategory == .all || wb.category == selectedCategory
+            return categoryMatch && matches(wb.title, wb.subtitle, wb.category.rawValue)
+        }
+    }
 
     var filteredPackages: [PackageDemo] {
         PackageDemo.allCases.filter { pkg in
             let categoryMatch = selectedCategory == .all || pkg.category == selectedCategory
             return categoryMatch && matches(pkg.title, pkg.purpose, pkg.highlightedAPIs.joined(separator: " "))
+        }
+    }
+
+    var filteredEnterpriseBlueprints: [EnterpriseBlueprintSpec] {
+        EnterpriseBlueprintCatalog.allSpecs.filter { spec in
+            let categoryMatch = selectedCategory == .all || selectedCategory == .blueprints
+            let platforms = spec.supportedPlatforms.map(\.displayName).joined(separator: " ")
+            return categoryMatch && matches(
+                spec.title,
+                spec.subtitle,
+                spec.vertical.title,
+                spec.id.rawValue,
+                platforms
+            )
         }
     }
 
@@ -128,10 +172,32 @@ final class PlaygroundViewModel: ObservableObject {
     }
 
     var selectionDisplayTitle: String {
-        if case .savedSnippet(let id) = selection, let found = pinnedSnippet(for: id) {
-            return found.title
+        switch selection {
+        case .savedSnippet(let id):
+            return pinnedSnippet(for: id)?.title ?? selection.title
+        case .enterpriseBlueprint(let rawID):
+            if let bpID = EnterpriseBlueprintID(rawValue: rawID) {
+                return EnterpriseBlueprintCatalog.spec(for: bpID).title
+            }
+            return selection.title
+        default:
+            return selection.title
         }
-        return selection.title
+    }
+
+    var selectionSubtitle: String {
+        switch selection {
+        case .savedSnippet(let id):
+            return pinnedSnippet(for: id)?.notes ?? selection.subtitle
+        case .enterpriseBlueprint(let rawID):
+            if let bpID = EnterpriseBlueprintID(rawValue: rawID) {
+                let spec = EnterpriseBlueprintCatalog.spec(for: bpID)
+                return "\(spec.vertical.title) — \(spec.subtitle)"
+            }
+            return selection.subtitle
+        default:
+            return selection.subtitle
+        }
     }
 
     // MARK: - What You're Learning Metadata
@@ -140,10 +206,16 @@ final class PlaygroundViewModel: ObservableObject {
         switch selection {
         case .package(let pkg):
             return pkg.learningHeadline
+        case .workbench(let wb):
+            return workbenchLearningHeadline(for: wb)
         case .template(let kind):
             return DemoLibrary.templateExample(for: kind, theme: themeTokens).explanation
         case .blueprint(let domain):
             return "Compose a cohesive multi-package \(domain.title) architecture uniting SwiftBlocks, SwiftState, NotebookFlowKit, and CoreLocalAIKit."
+        case .enterpriseBlueprint(let rawID):
+            let bpID = EnterpriseBlueprintID(rawValue: rawID) ?? .neobankMultiCurrencyTreasury
+            let spec = EnterpriseBlueprintCatalog.spec(for: bpID)
+            return "Explore and export the 8-layer \(spec.title) (\(spec.vertical.title)) enterprise blueprint into a 14-file Swift 6 workspace."
         case .savedSnippet(let id):
             return pinnedSnippet(for: id)?.notes ?? "Custom SwiftUI snippet saved to your ChiefKit Studio workspace."
         }
@@ -153,6 +225,8 @@ final class PlaygroundViewModel: ObservableObject {
         switch selection {
         case .package(let pkg):
             return pkg.learningKeyPoints
+        case .workbench(let wb):
+            return workbenchLearningPoints(for: wb)
         case .template(let kind):
             return DemoLibrary.templateExample(for: kind, theme: themeTokens).learningPoints
         case .blueprint:
@@ -160,6 +234,14 @@ final class PlaygroundViewModel: ObservableObject {
                 "Toggle architectural layers (UI, Store, Onboarding, Local AI, @Test) and watch code adapt live",
                 "Export the entire multi-layer blueprint with bundled tests in one click (⌘⇧E)",
                 "Save your tailored blueprint & tokens into a portable .chiefkit workspace (⌘S)"
+            ]
+        case .enterpriseBlueprint(let rawID):
+            let bpID = EnterpriseBlueprintID(rawValue: rawID) ?? .neobankMultiCurrencyTreasury
+            let spec = EnterpriseBlueprintCatalog.spec(for: bpID)
+            return [
+                "Inspect \(spec.domainEntities.count) SwiftData @Model entities, \(spec.reducerActions.count) deterministic Reducer actions, and \(spec.apiEndpoints.count) REST endpoints",
+                "Toggle any of the 8 enterprise layers (SwiftBlocks UI, Reducer, SwiftData, REST API, Onboarding, Local AI, Privacy, @Test)",
+                "Export a complete 14-file Swift 6 SwiftPM package (~saves \(spec.complexityTier.estimatedWeeksSaved) engineering weeks) in one click"
             ]
         case .savedSnippet:
             return [
@@ -174,12 +256,114 @@ final class PlaygroundViewModel: ObservableObject {
         switch selection {
         case .package(let pkg):
             return pkg.highlightedAPIs
+        case .workbench(let wb):
+            return workbenchHighlightedAPIs(for: wb)
         case .template(let kind):
             return DemoLibrary.templateExample(for: kind, theme: themeTokens).highlightedAPIs
         case .blueprint:
             return ["EDKSurface", "Reducer", "NotebookFlowView", "NLLanguageRecognizer", "@Test"]
+        case .enterpriseBlueprint(let rawID):
+            let bpID = EnterpriseBlueprintID(rawValue: rawID) ?? .neobankMultiCurrencyTreasury
+            let spec = EnterpriseBlueprintCatalog.spec(for: bpID)
+            let entityName = spec.domainEntities.first?.name ?? "@Model"
+            return [entityName, "BlueprintWorkspaceExporter", "@Model", "PrivacyInfo.xcprivacy", "@Test"]
         case .savedSnippet:
             return ["View", "EDKTheme", "@ScaledMetric"]
+        }
+    }
+
+    private func workbenchLearningHeadline(for wb: StudioWorkbenchKind) -> String {
+        switch wb {
+        case .astCompiler:
+            return "Tokenize, parse, refactor, audit across 38 static rules, and round-trip SwiftUI views to and from the visual canvas."
+        case .animationAndPhysics:
+            return "Solve analytical and 4th-order Runge-Kutta (RK4) spring equations, sculpt cubic-bezier curves, and emit PhaseAnimator/KeyframeAnimator code."
+        case .multiArtboardAndSVG:
+            return "Compare responsive layouts across 5 Apple device viewports with deterministic auto-layout solving and 42 W3C SVG vector shapes."
+        case .componentCatalog64:
+            return "Browse all 64 SwiftBlocks 3.0 components backed by OKLCH perceptual tonal scales, APCA Lc contrast, CVD simulation, and 8 token targets."
+        case .dataAndAPISchema:
+            return "Model 3NF relational schemas and compile SwiftData @Model, SQLite3 STRICT DDL, CoreData XML, OpenAPI 3.1, GraphQL, and mock HTTP responses."
+        case .localizationCatalog:
+            return "Author Apple .xcstrings String Catalogs across 10 locales with CLDR plural rules, pseudolocalization stress modes, RTL mirroring, and typed L10n."
+        case .securityAndEphemeris:
+            return "Combine NIST/RFC pure-Swift SHA-2/HKDF/XChaCha20-Poly1305 vaults, Shamir GF(256) secret sharing, 30 OWASP rules, and EphemerisCore planetary TOTP."
+        case .performanceProfiler:
+            return "Simulate 60Hz, 90Hz visionOS, and 120Hz ProMotion frame budgets, patch Metal offscreen compositing hazards, and graph @Observable blast radius."
+        }
+    }
+
+    private func workbenchLearningPoints(for wb: StudioWorkbenchKind) -> [String] {
+        switch wb {
+        case .astCompiler:
+            return [
+                "Run 6 deterministic AST refactoring passes (@Observable migration, tokenizing magic literals, VoiceOver injection)",
+                "Import arbitrary SwiftUI VStack/HStack/ZStack hierarchies onto the interactive SwiftBlocks Canvas",
+                "Evaluate Halstead volume, cyclomatic/cognitive complexity, and synthesize @Test suites automatically"
+            ]
+        case .animationAndPhysics:
+            return [
+                "Compare closed-form damped harmonic oscillator curves against numerical RK4 integration with air drag",
+                "Scrub multi-track KeyframeTimeline animations combining spring, cubic-bezier, linear, and discrete steps",
+                "Export ready-to-paste SwiftUI PhaseAnimator, KeyframeAnimator, or calibrated .spring(...) modifiers"
+            ]
+        case .multiArtboardAndSVG:
+            return [
+                "Solve constraint layouts simultaneously on iPhone 16 Pro, iPad Pro 13\", MacBook Pro 16\", Vision Pro & Watch Ultra 2",
+                "Inspect ASCII/SVG layout wireframes, overflow warnings, and Compact vs Regular size-class adaptations",
+                "Parse W3C SVG path commands (M/L/H/V/C/S/Q/T/A/Z) and emit normalized SwiftUI Shape structs"
+            ]
+        case .componentCatalog64:
+            return [
+                "Filter 64 accessible SwiftBlocks across Primitives, Inputs, Navigation, Data, Charts, Commerce, AI & Spatial",
+                "Verify perceptual lightness across 11 OKLCH tonal stops (50–950), APCA Lc contrast, and 7 color-blindness matrices",
+                "Compile semantic design tokens simultaneously to SwiftUI, UIKit, AppKit, W3C JSON, CSS, Tailwind, Compose & Asset Catalog"
+            ]
+        case .dataAndAPISchema:
+            return [
+                "Switch between 6 domain ER schemas and inspect 3NF normalization scores and missing foreign-key index advisories",
+                "Synthesize SwiftData @Model classes, SQLite3 STRICT WAL migrations, OpenAPI 3.1 JSON, and GraphQL SDL",
+                "Dispatch simulated REST requests against deterministic CRUD endpoints with realistic latency and JSON payloads"
+            ]
+        case .localizationCatalog:
+            return [
+                "Extract translatable SwiftUI Text/Button/Label literals directly into an Apple Xcode 15+ .xcstrings catalog",
+                "Test Arabic/Hebrew RTL layout mirroring, CLDR plural categories, and Accented/Expanded/RTL pseudolocalization",
+                "Audit format-specifier parity (%lld, %@) across locales and generate compile-time-safe enum L10n accessors"
+            ]
+        case .securityAndEphemeris:
+            return [
+                "Compute live 9-body planetary ephemerides (VSOP87/Meeus) + geodetic topocentric coordinates for Celestial-TOTP auth",
+                "Seal portable .chiefkit.vault payloads with PBKDF2 + XChaCha20-Poly1305 and split keys into 3-of-5 Shamir GF(256) shares",
+                "Scan Swift code against 30 OWASP Mobile Top 10 rules and auto-infer App Store PrivacyInfo.xcprivacy XML"
+            ]
+        case .performanceProfiler:
+            return [
+                "Break down per-frame CPU view diffing, layout passes, CoreAnimation commits, and Metal GPU offscreen passes",
+                "Auto-patch .shadow/.blur/.mask GPU compositing hazards with .drawingGroup() and equatable subview boundaries",
+                "Analyze @State, @Environment, and @Observable read/write dependencies to minimize view invalidation blast radius"
+            ]
+        }
+    }
+
+    private func workbenchHighlightedAPIs(for wb: StudioWorkbenchKind) -> [String] {
+        switch wb {
+        case .astCompiler:
+            return ["ChiefKitASTModule", "ASTCanvasBridge", "ASTTransformationEngine", "ASTStaticAuditEngine", "ASTTestSynthesizer"]
+        case .animationAndPhysics:
+            return ["SpringParameters", "RK4SpringIntegrator", "CubicBezierCurve", "AnimationTimeline", "PhaseAnimator"]
+        case .multiArtboardAndSVG:
+            return ["ArtboardDevicePreset", "AutoLayoutConstraintSolver", "SVGPathEngine", "ChiefKitVectorIcon", "Shape"]
+        case .componentCatalog64:
+            return ["SwiftBlockCatalog", "OKLCHColor", "APCAEvaluation", "ColorBlindnessKind", "DesignTokenCompiler"]
+        case .dataAndAPISchema:
+            return ["DataSchemaWorkspace", "PersistenceCodeSynthesizer", "APISpecAndMockEngine", "@Model", "OpenAPI 3.1"]
+        case .localizationCatalog:
+            return ["LocalizationCatalog", "StringCatalogCompiler", "Pseudolocalizer", "CLDRPluralCategory", "L10n"]
+        case .securityAndEphemeris:
+            return ["EphemerisSkySnapshot", "EphemerisEntropyProtocol", "EncryptedWorkspaceVault", "ShamirSecretSharing", "StaticSecurityScanner"]
+        case .performanceProfiler:
+            return ["FrameBudgetProfiler", "DisplayRefreshTarget", "FlamegraphNode", "StateInvalidationAnalyzer", "@Observable"]
         }
     }
 
@@ -214,12 +398,65 @@ final class PlaygroundViewModel: ObservableObject {
             return DemoLibrary.notebookUsageCode(flowTitle: title)
         case .package(.coreLocalAIKit):
             return DemoLibrary.coreLocalAIKitUsageCode
+        case .workbench(let wb):
+            return baselineWorkbenchCode(for: wb)
         case .template(let kind):
             return DemoLibrary.templateExample(for: kind, theme: themeTokens).swiftUICode
         case .blueprint(let domain):
             return blueprintConfig.synthesizeSwiftUICode(for: domain, theme: themeTokens)
+        case .enterpriseBlueprint(let rawID):
+            let bpID = EnterpriseBlueprintID(rawValue: rawID) ?? .neobankMultiCurrencyTreasury
+            let spec = EnterpriseBlueprintCatalog.spec(for: bpID)
+            return spec.synthesizeSwiftUIView(theme: themeTokens, layers: orderedEnterpriseLayers)
         case .savedSnippet(let id):
             return pinnedSnippet(for: id)?.swiftUICode ?? "// Snippet not found"
+        }
+    }
+
+    private func baselineWorkbenchCode(for wb: StudioWorkbenchKind) -> String {
+        switch wb {
+        case .astCompiler:
+            return ASTCanvasBridge.exportToFormattedSwift(
+                document: canvasDocument,
+                structName: "ASTLabCanvasView",
+                theme: themeTokens
+            ).formattedSource
+        case .animationAndPhysics:
+            return AnimationTimeline.synthesizePhaseAnimatorCode(
+                structName: "LiquidGlassPhaseBanner",
+                spring: .snappy
+            )
+        case .multiArtboardAndSVG:
+            return ChiefKitVectorIcon.liquidGlassCube.emitSwiftUIShape(structName: "LiquidGlassCubeShape")
+        case .componentCatalog64:
+            return SwiftBlockCatalog.synthesizeCode(
+                for: .virtualCardGlassView,
+                theme: themeTokens,
+                variant: "glass",
+                state: .hovered
+            )
+        case .dataAndAPISchema:
+            return PersistenceCodeSynthesizer.synthesize(
+                workspace: .preset(.fintechDoubleEntry),
+                backend: .swiftData
+            ).sourceCode
+        case .localizationCatalog:
+            return StringCatalogCompiler.synthesizeL10nSwiftEnum(
+                from: StudioBuiltInTranslations.catalog(for: .studioCoreUI),
+                enumName: "L10n"
+            )
+        case .securityAndEphemeris:
+            return EphemerisAuthenticatorCodeSynthesizer.synthesizeSwift6ActorSource(
+                actorName: "CelestialSessionAuthenticator",
+                config: .highSecurityGeodetic30s
+            )
+        case .performanceProfiler:
+            return canvasDocument.generateSwiftUICode(
+                theme: themeTokens,
+                layoutMode: canvasLayoutMode,
+                focusedNodeID: nil,
+                focusSelectedOnly: false
+            )
         }
     }
 
@@ -237,21 +474,37 @@ final class PlaygroundViewModel: ObservableObject {
         if let customTests = generatedUnitTestsBySelection[selection] {
             return customTests
         }
-        if case .blueprint(let domain) = selection {
+        switch selection {
+        case .blueprint(let domain):
             return blueprintConfig.synthesizeSwiftTests(for: domain)
-        }
-        return """
-        import Testing
+        case .enterpriseBlueprint(let rawID):
+            let bpID = EnterpriseBlueprintID(rawValue: rawID) ?? .neobankMultiCurrencyTreasury
+            return EnterpriseBlueprintCatalog.spec(for: bpID).synthesizeSwiftTests()
+        case .workbench(.astCompiler):
+            return ASTTestSynthesizer.synthesize(
+                source: baselineSwiftUICode,
+                moduleUnderTest: "ChiefKitApp",
+                framework: .swiftTesting
+            ).generatedCode
+        case .workbench(.securityAndEphemeris):
+            return SecurityAuditReportSynthesizer.synthesizeSecurityRegressionTestSuite(
+                workspaceName: "ChiefKitSecurityVault",
+                ephemerisConfig: .highSecurityGeodetic30s
+            )
+        default:
+            return """
+            import Testing
 
-        @Suite("\(selectionDisplayTitle) Verification")
-        struct GeneratedQuickTests {
-            @Test("Theme primary token satisfies WCAG contrast check")
-            func primaryTokenContrast() {
-                let ratio = \(String(format: "%.2f", themeTokens.contrastReport.primaryOnSurfaceRatio))
-                #expect(ratio >= 3.0)
+            @Suite("\(selectionDisplayTitle) Verification")
+            struct GeneratedQuickTests {
+                @Test("Theme primary token satisfies WCAG contrast check")
+                func primaryTokenContrast() {
+                    let ratio = \(String(format: "%.2f", themeTokens.contrastReport.primaryOnSurfaceRatio))
+                    #expect(ratio >= 3.0)
+                }
             }
+            """
         }
-        """
     }
 
     var currentDiffReport: DiffReport {
@@ -274,6 +527,11 @@ final class PlaygroundViewModel: ObservableObject {
             return flowJSON
         case .blueprint(let domain):
             return blueprintConfig.synthesizeFlowJSON(for: domain)
+        case .enterpriseBlueprint(let rawID):
+            let bpID = EnterpriseBlueprintID(rawValue: rawID) ?? .neobankMultiCurrencyTreasury
+            return EnterpriseBlueprintCatalog.spec(for: bpID).synthesizeOnboardingFlowJSON()
+        case .workbench(let wb):
+            return workbenchDataPreview(for: wb)
         case .package(.swiftBlocks):
             return canvasJSONPreview
         case .package(.coreLocalAIKit):
@@ -282,6 +540,59 @@ final class PlaygroundViewModel: ObservableObject {
             return DemoLibrary.templateExample(for: kind, theme: themeTokens).explanation
         case .savedSnippet(let id):
             return pinnedSnippet(for: id)?.notes ?? "{}"
+        }
+    }
+
+    private func workbenchDataPreview(for wb: StudioWorkbenchKind) -> String {
+        switch wb {
+        case .astCompiler:
+            let snap = ChiefKitASTModule.analyzePipeline(source: selectedSwiftUICode, theme: themeTokens)
+            return prettyJSON([
+                "tokens": snap.tokenSummary.totalTokens,
+                "viewNodes": snap.sourceFile.allViewNodes().count,
+                "auditScore": snap.auditReport.overallScore,
+                "rulesEvaluated": snap.auditReport.totalRuleCount,
+                "maintainabilityGrade": snap.metricsReport.maintainabilityGrade
+            ])
+        case .animationAndPhysics:
+            let spring = SpringAnalysisReport(parameters: .snappy)
+            return prettyJSON([
+                "regime": spring.regime.rawValue,
+                "settlingDurationSec": spring.settlingDurationSeconds,
+                "peakOvershootPercent": spring.peakOvershootPercent,
+                "rk4AnalyticalRMSError": spring.rk4AnalyticalRMSError
+            ])
+        case .multiArtboardAndSVG:
+            return prettyJSON([
+                "artboardPresets": ArtboardDevicePreset.allCases.map(\.displayName),
+                "svgCatalogCount": ChiefKitVectorIcon.allCases.count,
+                "canvasNodes": canvasDocument.nodes.count
+            ])
+        case .componentCatalog64:
+            return DesignTokenCompiler.compile(tokens: themeTokens, target: .w3cJSON, namespace: "ChiefKit")
+        case .dataAndAPISchema:
+            let service = APIServiceSpec.deriveCRUDService(from: .preset(.fintechDoubleEntry))
+            return APISpecAndMockEngine.compileOpenAPI31JSON(service)
+        case .localizationCatalog:
+            let catalog = StudioBuiltInTranslations.catalog(for: .studioCoreUI)
+            return (try? catalog.encodeXCStringsJSON()) ?? "{}"
+        case .securityAndEphemeris:
+            let manifest = ApplePrivacyManifestBuilder.inferCompliantManifest(fromSwiftSources: [selectedSwiftUICode])
+            return manifest.compilePrivacyInfoPlistXML()
+        case .performanceProfiler:
+            let profile = FrameBudgetProfiler.profile(
+                swiftUISource: selectedSwiftUICode,
+                canvas: canvasDocument,
+                theme: themeTokens,
+                target: .proMotion120Hz
+            )
+            return prettyJSON([
+                "target": profile.target.rawValue,
+                "budgetMs": profile.budgetMs,
+                "totalFrameTimeMs": profile.totalFrameTimeMs,
+                "meetsFrameBudget": profile.meetsFrameBudget,
+                "grade": profile.performanceGrade
+            ])
         }
     }
 
@@ -928,8 +1239,8 @@ final class PlaygroundViewModel: ObservableObject {
 
     func runStudioSelfCheck() {
         Task {
-            let report = await StudioSelfCheckRunner.runAll()
-            statusMessage = "Self-Check: \(report.passedCount)/\(report.steps.count) subsystems passed in \(String(format: "%.1f", report.durationMilliseconds)) ms"
+            let report = await MasterSuiteRunner.runFullMasterSelfCheck()
+            statusMessage = "Master Self-Check: \(report.passedCount)/\(report.steps.count) subsystems passed in \(String(format: "%.1f", report.durationMilliseconds)) ms"
         }
     }
 
@@ -946,6 +1257,7 @@ final class PlaygroundViewModel: ObservableObject {
         flowAnswers.removeAll()
         themeTokens = StudioThemeTokens()
         activeThemePreset = .chiefKitBlue
+        activeEnterpriseLayers = Set(EnterpriseLayerKind.allCases)
         let starter = CanvasDocument.starter(radius: 12)
         canvasDocument = starter
         canvasHistory.clear()
@@ -1044,6 +1356,28 @@ final class PlaygroundViewModel: ObservableObject {
     var allCommandItems: [CommandPaletteItem] {
         var items: [CommandPaletteItem] = []
 
+        for wb in StudioWorkbenchKind.allCases {
+            let shortcut: String?
+            switch wb {
+            case .astCompiler: shortcut = "⌥⌘1"
+            case .componentCatalog64: shortcut = "⌥⌘2"
+            case .securityAndEphemeris: shortcut = "⌥⌘3"
+            case .performanceProfiler: shortcut = "⌥⌘4"
+            default: shortcut = "Studio 3.0"
+            }
+            items.append(
+                CommandPaletteItem(
+                    id: "nav-wb-\(wb.rawValue)",
+                    title: "Workbench: \(wb.title)",
+                    subtitle: wb.subtitle,
+                    symbolName: wb.symbolName,
+                    shortcutHint: shortcut,
+                    section: .navigation,
+                    action: .navigate(.workbench(wb))
+                )
+            )
+        }
+
         for pkg in PackageDemo.allCases {
             items.append(
                 CommandPaletteItem(
@@ -1058,11 +1392,25 @@ final class PlaygroundViewModel: ObservableObject {
             )
         }
 
+        for spec in EnterpriseBlueprintCatalog.allSpecs {
+            items.append(
+                CommandPaletteItem(
+                    id: "nav-ebp-\(spec.id.rawValue)",
+                    title: "Enterprise Blueprint: \(spec.title)",
+                    subtitle: "\(spec.vertical.title) — \(spec.subtitle)",
+                    symbolName: spec.sfSymbol,
+                    shortcutHint: "14-File",
+                    section: .navigation,
+                    action: .navigate(.enterpriseBlueprint(spec.id.rawValue))
+                )
+            )
+        }
+
         for bp in BlueprintDomain.allCases {
             items.append(
                 CommandPaletteItem(
                     id: "nav-bp-\(bp.rawValue)",
-                    title: "Blueprint: \(bp.title)",
+                    title: "Classic Blueprint: \(bp.title)",
                     subtitle: bp.summary,
                     symbolName: bp.symbolName,
                     shortcutHint: "Full-Stack",
@@ -1175,10 +1523,10 @@ final class PlaygroundViewModel: ObservableObject {
             ),
             CommandPaletteItem(
                 id: "ws-selfcheck",
-                title: "Run Studio Self-Check Diagnostics",
-                subtitle: "Verify Canvas, WCAG Tokens, Flow Graph, Time-Travel, Local AI & Exporter",
+                title: "Run 16-Subsystem Master Self-Check",
+                subtitle: "Verify AST, OKLCH/APCA, 64 SwiftBlocks, ChaCha20 Vault, EphemerisCore & 28 Blueprints",
                 symbolName: "checkmark.shield.fill",
-                shortcutHint: nil,
+                shortcutHint: "⌥⌘R",
                 section: .workspace,
                 action: .runSelfCheck
             ),

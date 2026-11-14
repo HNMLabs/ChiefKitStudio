@@ -44,10 +44,28 @@ struct DemoDetailView: View {
                             NotebookFlowDemoView(viewModel: viewModel)
                         case .package(.coreLocalAIKit):
                             CoreLocalAIDemoView(viewModel: viewModel)
+                        case .workbench(.astCompiler):
+                            ASTWorkbenchView(viewModel: viewModel)
+                        case .workbench(.animationAndPhysics):
+                            AnimationTimelineStudioView(viewModel: viewModel)
+                        case .workbench(.multiArtboardAndSVG):
+                            MultiArtboardStudioView(viewModel: viewModel)
+                        case .workbench(.componentCatalog64):
+                            ComponentCatalogBrowserView(viewModel: viewModel)
+                        case .workbench(.dataAndAPISchema):
+                            DataAPISchemaStudioView(viewModel: viewModel)
+                        case .workbench(.localizationCatalog):
+                            LocalizationCatalogStudioView(viewModel: viewModel)
+                        case .workbench(.securityAndEphemeris):
+                            SecurityEphemerisStudioView(viewModel: viewModel)
+                        case .workbench(.performanceProfiler):
+                            PerformanceProfilerStudioView(viewModel: viewModel)
                         case .template(let template):
                             TemplateDemoView(viewModel: viewModel, template: template)
                         case .blueprint(let domain):
                             BlueprintComposerView(viewModel: viewModel, domain: domain)
+                        case .enterpriseBlueprint(let rawID):
+                            EnterpriseBlueprintExplorerView(viewModel: viewModel, initialBlueprintRawID: rawID)
                         case .savedSnippet(let id):
                             PinnedSnippetPreviewView(viewModel: viewModel, snippetID: id)
                         }
@@ -147,7 +165,7 @@ private struct HeaderView: View {
                     )
                 }
 
-                Text(viewModel.selection.subtitle)
+                Text(viewModel.selectionSubtitle)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

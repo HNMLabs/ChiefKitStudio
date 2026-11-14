@@ -19,11 +19,15 @@ struct ChiefKitStudioApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
+        if CommandLine.arguments.contains("--stats") {
+            print(MasterSuiteRunner.generatePlatformStatsReport())
+            Foundation.exit(0)
+        }
         if CommandLine.arguments.contains("--self-check") {
             let semaphore = DispatchSemaphore(value: 0)
             nonisolated(unsafe) var allOK = true
             Task {
-                let report = await StudioSelfCheckRunner.runAll()
+                let report = await MasterSuiteRunner.runFullMasterSelfCheck()
                 print(report.formattedSummary)
                 allOK = report.allPassed
                 semaphore.signal()
@@ -34,9 +38,9 @@ struct ChiefKitStudioApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("ChiefKit Studio") {
+        WindowGroup("ChiefKit Studio 3.0") {
             ContentView()
-                .frame(minWidth: 920, minHeight: 660)
+                .frame(minWidth: 960, minHeight: 680)
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
@@ -77,6 +81,35 @@ struct ChiefKitStudioApp: App {
                     NotificationCenter.default.post(name: .studioToggleCommandPalette, object: nil)
                 }
                 .keyboardShortcut("k", modifiers: .command)
+
+                Divider()
+
+                Button("SwiftUI AST & Refactoring Lab") {
+                    NotificationCenter.default.post(name: .studioOpenASTLab, object: nil)
+                }
+                .keyboardShortcut("1", modifiers: [.command, .option])
+
+                Button("SwiftBlocks 3.0 Catalog (64)") {
+                    NotificationCenter.default.post(name: .studioOpenComponentCatalog, object: nil)
+                }
+                .keyboardShortcut("2", modifiers: [.command, .option])
+
+                Button("EphemerisCore & ChaCha20 Security Vault") {
+                    NotificationCenter.default.post(name: .studioOpenSecurityVault, object: nil)
+                }
+                .keyboardShortcut("3", modifiers: [.command, .option])
+
+                Button("120Hz ProMotion & Invalidation Profiler") {
+                    NotificationCenter.default.post(name: .studioOpenPerformanceProfiler, object: nil)
+                }
+                .keyboardShortcut("4", modifiers: [.command, .option])
+
+                Button("Run 16-Subsystem Master Self-Check") {
+                    NotificationCenter.default.post(name: .studioRunMasterSelfCheck, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+
+                Divider()
 
                 Button("Toggle State Time-Travel Debugger") {
                     NotificationCenter.default.post(name: .studioToggleTimeTravel, object: nil)

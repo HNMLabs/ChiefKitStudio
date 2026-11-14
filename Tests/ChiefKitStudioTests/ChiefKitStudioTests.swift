@@ -419,7 +419,7 @@ final class ChiefKitStudioTests: XCTestCase {
     func testStudioSelfCheckRunnerPassesAllSubsystems() async {
         let report = await StudioSelfCheckRunner.runAll()
         XCTAssertTrue(report.allPassed, report.formattedSummary)
-        XCTAssertEqual(report.steps.count, 7)
+        XCTAssertEqual(report.steps.count, 11)
     }
 
     #if canImport(SwiftUI) && canImport(AppKit)

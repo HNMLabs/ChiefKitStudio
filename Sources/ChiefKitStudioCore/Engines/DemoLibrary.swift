@@ -209,10 +209,23 @@ public enum DemoLibrary {
         switch selection {
         case .package(let pkg):
             return [pkg]
+        case .workbench(let wb):
+            switch wb {
+            case .astCompiler, .securityAndEphemeris:
+                return [.coreLocalAIKit, .swiftBlocks]
+            case .animationAndPhysics, .multiArtboardAndSVG, .componentCatalog64:
+                return [.swiftBlocks]
+            case .dataAndAPISchema, .performanceProfiler:
+                return [.swiftState, .swiftBlocks]
+            case .localizationCatalog:
+                return [.swiftBlocks, .notebookFlowKit]
+            }
         case .template(let kind):
             return templateExample(for: kind, theme: StudioThemeTokens()).requiredPackages
         case .blueprint:
             return blueprint.requiredPackages
+        case .enterpriseBlueprint:
+            return PackageDemo.allCases
         case .savedSnippet:
             return [.swiftBlocks]
         }

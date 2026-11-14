@@ -318,17 +318,90 @@ public struct SavedSnippet: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+public enum StudioWorkbenchKind: String, CaseIterable, Identifiable, Hashable, Codable, Sendable {
+    case astCompiler
+    case animationAndPhysics
+    case multiArtboardAndSVG
+    case componentCatalog64
+    case dataAndAPISchema
+    case localizationCatalog
+    case securityAndEphemeris
+    case performanceProfiler
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .astCompiler: "SwiftUI AST & Refactoring Lab"
+        case .animationAndPhysics: "Spring Physics & Keyframe Studio"
+        case .multiArtboardAndSVG: "Multi-Artboard, Auto-Layout & SVG"
+        case .componentCatalog64: "SwiftBlocks 3.0 Catalog (64)"
+        case .dataAndAPISchema: "ER Data Schema, SQLite & OpenAPI"
+        case .localizationCatalog: "String Catalog (.xcstrings) & RTL"
+        case .securityAndEphemeris: "EphemerisCore & ChaCha20 Vault"
+        case .performanceProfiler: "120Hz ProMotion & Invalidation Profiler"
+        }
+    }
+
+    public var subtitle: String {
+        switch self {
+        case .astCompiler:
+            "Bidirectional SwiftUI lexer/parser, 38 static audit rules, 6 AST refactoring passes, and @Test synthesis."
+        case .animationAndPhysics:
+            "Analytical + RK4 spring physics, cubic-bezier curves, multi-track keyframes, and PhaseAnimator synthesis."
+        case .multiArtboardAndSVG:
+            "Multi-device artboards, deterministic auto-layout solver, and 42 W3C SVG vector paths."
+        case .componentCatalog64:
+            "64 production SwiftBlocks 3.0 components, OKLCH/APCA perceptual color science, and 8-target token export."
+        case .dataAndAPISchema:
+            "Visual Entity-Relationship modeler compiling SwiftData @Model, strict SQLite DDL, OpenAPI 3.1, and GraphQL."
+        case .localizationCatalog:
+            "Apple .xcstrings String Catalog editor, CLDR plurals, format checker, pseudolocalization, and RTL preview."
+        case .securityAndEphemeris:
+            "Pure-Swift SHA-2/HKDF/ChaCha20-Poly1305 vault, EphemerisCore planetary auth, OWASP & PrivacyInfo.xcprivacy."
+        case .performanceProfiler:
+            "120Hz ProMotion frame-budget simulator, GPU offscreen hazard detector, and @Observable invalidation graph."
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .astCompiler: "chevron.left.forwardslash.chevron.right"
+        case .animationAndPhysics: "waveform.path.ecg"
+        case .multiArtboardAndSVG: "rectangle.3.group"
+        case .componentCatalog64: "square.grid.3x3.fill"
+        case .dataAndAPISchema: "cylinder.split.1x2.fill"
+        case .localizationCatalog: "globe"
+        case .securityAndEphemeris: "lock.shield.fill"
+        case .performanceProfiler: "gauge.with.needle.fill"
+        }
+    }
+
+    public var category: ExampleCategory {
+        switch self {
+        case .astCompiler, .securityAndEphemeris: .localAI
+        case .animationAndPhysics, .multiArtboardAndSVG, .componentCatalog64: .designSystem
+        case .dataAndAPISchema, .performanceProfiler: .state
+        case .localizationCatalog: .forms
+        }
+    }
+}
+
 public enum NavigationSelection: Hashable, Codable, Sendable {
     case package(PackageDemo)
+    case workbench(StudioWorkbenchKind)
     case template(TemplateKind)
     case blueprint(BlueprintDomain)
+    case enterpriseBlueprint(String)
     case savedSnippet(UUID)
 
     public var title: String {
         switch self {
         case .package(let package): package.title
+        case .workbench(let wb): wb.title
         case .template(let template): template.title
         case .blueprint(let domain): domain.title
+        case .enterpriseBlueprint(let rawID): rawID
         case .savedSnippet: "Pinned Snippet"
         }
     }
@@ -336,8 +409,10 @@ public enum NavigationSelection: Hashable, Codable, Sendable {
     public var subtitle: String {
         switch self {
         case .package(let package): package.purpose
+        case .workbench(let wb): wb.subtitle
         case .template(let template): template.summary
         case .blueprint(let domain): domain.summary
+        case .enterpriseBlueprint: "8-layer enterprise full-stack ChiefKit Studio 3.0 architecture."
         case .savedSnippet: "Custom developer snippet pinned inside this ChiefKit workspace."
         }
     }
@@ -345,8 +420,10 @@ public enum NavigationSelection: Hashable, Codable, Sendable {
     public var symbolName: String {
         switch self {
         case .package(let package): package.symbolName
+        case .workbench(let wb): wb.symbolName
         case .template(let template): template.symbolName
         case .blueprint(let domain): domain.symbolName
+        case .enterpriseBlueprint: "building.2.crop.circle.fill"
         case .savedSnippet: "pin.fill"
         }
     }
@@ -354,8 +431,9 @@ public enum NavigationSelection: Hashable, Codable, Sendable {
     public var category: ExampleCategory {
         switch self {
         case .package(let package): package.category
+        case .workbench(let wb): wb.category
         case .template(let template): template.category
-        case .blueprint: .blueprints
+        case .blueprint, .enterpriseBlueprint: .blueprints
         case .savedSnippet: .designSystem
         }
     }
