@@ -4,7 +4,7 @@ set -euo pipefail
 APP_NAME="ChiefKitStudio"
 DISPLAY_NAME="ChiefKit Studio"
 BUNDLE_ID="com.chiefvenzox.ChiefKitStudio"
-VERSION="1.0.0"
+VERSION="3.0.0"
 MIN_SYSTEM_VERSION="13.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,11 +26,12 @@ DMG_STAGING="$WORK_DIR/dmg-staging"
 TEMP_DMG_PATH="$WORK_DIR/$DISPLAY_NAME Setup.dmg"
 DMG_PATH="$DIST_DIR/$DISPLAY_NAME Setup.dmg"
 
-echo "Building $DISPLAY_NAME release..."
+echo "Building $DISPLAY_NAME $VERSION release..."
 swift build -c release
 
 BUILD_BIN_PATH="$(swift build -c release --show-bin-path)"
 BUILD_BINARY="$BUILD_BIN_PATH/$APP_NAME"
+RESOURCE_BUNDLE="$BUILD_BIN_PATH/${APP_NAME}_${APP_NAME}.bundle"
 
 echo "Creating app bundle..."
 mkdir -p "$DIST_DIR"
@@ -39,6 +40,10 @@ mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
+
+if [[ -d "$RESOURCE_BUNDLE" ]]; then
+  cp -R "$RESOURCE_BUNDLE" "$APP_RESOURCES/"
+fi
 
 if [[ -f "$ICON_SOURCE" ]]; then
   cp "$ICON_SOURCE" "$APP_RESOURCES/ChiefKitStudio.icns"
@@ -72,7 +77,7 @@ cat >"$INFO_PLIST" <<PLIST
   <key>CFBundleShortVersionString</key>
   <string>$VERSION</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>300</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSHighResolutionCapable</key>

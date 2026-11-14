@@ -1,43 +1,78 @@
-# Architecture
+# Architecture — ChiefKit Studio 3.0 Master Suite
 
-ChiefKit Studio 2.5 uses a clean two-target Swift 6 architecture with **zero external package dependencies**:
+ChiefKit Studio 3.0 uses a **7-target modular Swift 6 architecture** (`73,872` lines across `126` Swift files) with **zero external package dependencies**:
 
 ```text
-Sources/ChiefKitStudioCore/   Cross-platform pure Swift 6 core (macOS & Linux CI)
-  Models/
-    RGBAColorCore.swift       sRGB color math, WCAG 2.1 luminance/contrast & Auto-Fix AA
-    ThemeModels.swift         StudioThemeTokens, presets & SwiftBlocks / W3C JSON / CSS exporters
-    CanvasModels.swift        Drag-and-drop nodes, 6-axis alignment, auto-tidy grid & SwiftUI synthesis
-    FlowModels.swift          NotebookFlow JSON codec, topology edges & static flow validator
-    CatalogModels.swift       PackageDemo, TemplateKind, SavedSnippet & NavigationSelection
-    BlueprintModels.swift     Full-Stack Architecture Composer across 4 domains & 5 layers
-    TimelineModels.swift      TimeTravelEngine history scrubber & CanvasHistoryStack undo/redo
-    LocalAIModels.swift       On-device AI tasks (including @Test generation) & response payloads
-    WorkspaceSnapshot.swift   Portable .chiefkit workspace persistence
-  Engines/
-    LocalAIEngine.swift       On-device NaturalLanguage + optional FoundationModels + AST synthesis
-    CodeDiffEngine.swift      Exact LCS line-by-line diff & unified patch generator
-    CodeQualityAnalyzer.swift Real-time 0–100 Accessibility, Swift 6, Token & Testability scorer
-    DemoLibrary.swift         Live code & Package.swift dependency snippet catalog
-    ProjectGeneratorCore.swift Runnable SwiftPM starter project + W3C tokens + unit test emitter
-    StudioSelfCheckRunner.swift End-to-end 7-subsystem diagnostic runner (--self-check)
+Sources/ChiefKitStudioCore/      (27 files · 14,711 lines) Cross-platform pure Swift 6 foundation
+  Models/                        RGBAColor, StudioThemeTokens, CanvasDocument, FlowDefinition, BlueprintConfiguration, WorkspaceSnapshot
+  Engines/                       LocalAIEngine, CodeDiffEngine (LCS), CodeQualityAnalyzer, DemoLibrary, ProjectGeneratorCore, StudioSelfCheckRunner
+  DataSchema/                    EntitySchemaModels (6 ER presets, 3NF/cycle analyzer), PersistenceCodeSynthesizer (SwiftData/SQLite3 STRICT/CoreData/Actor), APISpecAndMockEngine (OpenAPI 3.1/GraphQL/Mock HTTP/URLSession)
+  Localization/                  StringCatalogModels (10 locales, CLDR plurals), StringCatalogCompiler (.xcstrings codec, pseudoloc, L10n enum), StudioBuiltInTranslations
+  Profiler/                      FrameBudgetProfiler (60/90/120Hz ProMotion & Flamegraphs), StateInvalidationAnalyzer (@Observable blast radius)
+  Runtime/                       SwiftStateMiddlewareEngine (StudioStore actor & CausalStateDAG), NotebookFlowRuntimeEngine (predicates, Mod-97 IBAN, .ipynb), MarkdownAndDocCompiler (DocC + HTML)
 
-Sources/ChiefKitStudio/       macOS SwiftUI Studio App + Headless CLI entry point
-  App/                        ChiefKitStudioApp (macOS GUI + shortcuts) & HeadlessMain (Linux/CI CLI)
-  Components/                 GlassCard, CodeBlockView, WhatYouLearnCard, FloatingTimeTravelView, AccessibilityOverlayView
-  Export/                     Clipboard, NSSavePanel/NSOpenPanel .chiefkit & Xcode launchers
-  Models/                     SwiftUI color/environment bridges, PreviewConfiguration & CommandPalette
-  Resources/                  App icon and ChiefKit brand assets
-  ViewModels/                 @MainActor PlaygroundViewModel coordinating all studio subsystems
-  Views/                      Sidebar, Preview Toolbar, Canvas, Blueprint Composer, Visual Flow Builder, Right Inspector
+Sources/ChiefKitAST/             (13 files · 11,777 lines) Swift 6 & SwiftUI Compiler Engine
+  SwiftTokenModels & SwiftLexer  Nested comments, raw/multiline strings, interpolations, radix literals
+  SwiftASTNodes & SwiftUIParser  Recursive-descent @ViewBuilder AST, modifiers, control flow & diagnostics
+  SwiftFormatterEngine           Deterministic idempotent AST & token formatter
+  ASTCanvasBridge                Bidirectional SwiftUI <-> CanvasDocument importer & exporter
+  ASTStaticAnalyzer              38 rules across Concurrency, Accessibility, Tokens, Performance & Safety
+  ASTTransformationEngine        6 automated AST refactoring passes (@Observable, SwiftState, A11y, Tokens, Subview, Telemetry)
+  ASTMetricsAndComplexity        McCabe cyclomatic, cognitive, Halstead & maintainability metrics
+  ASTTestSynthesizer             Dual Swift 6 Testing (@Suite/@Test) + XCTestCase code generator
+  ASTSymbolGraphBuilder          Cross-file symbol graph, cycle detector & Mermaid exporter
+  ASTSourceVerifier              Structural & directive verifier across cross-platform & macOS source trees
 
-Tests/ChiefKitStudioTests/
-  ChiefKitStudioTests.swift       19 XCTest unit & integration tests
-  StudioSwiftTestingSuite.swift   Parameterized Swift 6 Testing (@Suite / @Test) verification
+Sources/ChiefKitDesignSystem/    (13 files · 9,881 lines) Perceptual Color, Physics, SVG & 64 SwiftBlocks
+  PerceptualColorScience         sRGB <-> CIE XYZ/LAB <-> OKLAB <-> OKLCH, APCA Lc, CIEDE2000 & 7 CVD matrices
+  DesignTokenCompiler            8-target compiler (SwiftUI, AppKit, UIKit, W3C DTCG, CSS4 OKLCH, Tailwind v4, Compose, .xcassets)
+  TypographyAndGridSystem        132-entry Apple HIG Dynamic Type ramp, modular scales & 8 device grids
+  SpringAndAnimationPhysics      Analytical + RK4 harmonic oscillator, Newton-Raphson CubicBezier & KeyframeAnimator synthesis
+  SVGPathEngine                  20-command W3C SVG parser, arc parameterizer, ear-clipping tessellator & 42 vector icons
+  MultiArtboardEngine            Infinite viewport, smart snap-guides & cross-artboard symbol propagation
+  AutoLayoutConstraintSolver     Deterministic 2D stack/grid layout & ASCII/SVG wireframe solver
+  ComponentCatalog + 4 Suites    64 production SwiftBlocks 3.0 components across 8 categories
+
+Sources/ChiefKitSecurity/        (11 files · 9,852 lines) Pure-Swift Cryptography, EphemerisCore & SAST
+  PureSHA2Engine                 FIPS 180-4 SHA-224/256/384/512/512-256, Merkle trees & constant-time ops
+  MACAndKDFEngine                RFC 2104 HMAC, RFC 5869 HKDF, RFC 8018 PBKDF2 & RFC 6238 TOTP
+  ChaCha20Poly1305Engine         RFC 8439 ChaCha20, Poly1305 (2^130-5), AEAD, HChaCha20 & XChaCha20-Poly1305
+  EphemerisAstronomyMath         Julian Epoch, IAU GMST/LMST, Kepler solver (<1e-12 rad) & topocentric transforms
+  EphemerisPlanetaryElements     JPL J2000 9-body sky ephemerides, twilight/sunrise & lunar phases
+  EphemerisEntropyProtocol       Celestial-TOTP & ChaCha20-Poly1305 location/time-bound auth envelopes
+  WorkspaceVaultCrypto           .chiefkit.vault binary container + GF(2^8) Shamir k-of-n secret sharing
+  StaticSecurityScanner          30 OWASP Mobile Top 10 (M1-M10) vulnerability & secret-leak rules
+  ApplePrivacyManifestBuilder    PrivacyInfo.xcprivacy XML compiler/validator & Keychain/SecureEnclave actor synthesis
+  SecurityAuditReportSynthesizer OWASP scorecard, threat-model Mermaid diagrams & @Test regression generator
+
+Sources/ChiefKitBlueprints/      (13 files · 11,268 lines) 28 Enterprise Full-Stack Blueprints
+  EnterpriseBlueprintModels      9 industry verticals, 28 blueprints, 8 architectural layers & 5 Apple platforms
+  9 Industry Vertical Suites     Fintech, AI/DevTools, Health, Spatial Commerce, Productivity, Media, Science, SmartHome/EV, Enterprise Security
+  BlueprintMultiFileExporter     14-file runnable Swift 6 SwiftPM package generator
+  BlueprintArchitectureValidator Full catalog validator (FlowDefinition, brace balance, TR/EN keys, @Test coverage)
+
+Sources/ChiefKitStudio/          (41 files · 12,146 lines) macOS SwiftUI IDE + Cross-Platform CLI
+  App/                           ChiefKitStudioApp, HeadlessMain CLI & 16-subsystem MasterSuiteRunner
+  Studio3Views/                  8 Studio 3.0 Workbenches + 28-Blueprint Explorer
+  ViewModels/, Views/, Export/   @MainActor PlaygroundViewModel, Sidebar, Live Diff Inspector, Command Palette & Exporters
+
+Tests/ChiefKitStudioTests/       (8 files · 4,237 lines)
+  XCTest + Swift 6 @Suite/@Test  290+ test executions + static macOS SwiftUI view source verification
 ```
 
-## Key Design Decisions
+## Module Dependency Graph
 
-- **Zero External Build Dependencies:** ChiefKit Studio builds offline out of the box using system frameworks (`Foundation`, `SwiftUI`, `AppKit`, `NaturalLanguage`, and `#if canImport(FoundationModels)`), while synthesizing production code for `SwiftBlocks`, `SwiftState`, `NotebookFlowKit`, and `CoreLocalAIKit`.
-- **Cross-Platform Verifiability:** Extracting pure synthesis, WCAG contrast math, flow validation, time-travel, LCS diffing, and project generation into `ChiefKitStudioCore` enables full `swift build`, `swift test`, and `swift run ChiefKitStudio --self-check` execution on both macOS and Linux CI.
-- **Swift 6 Strict Concurrency:** Every model and engine conforms to `Sendable`, UI coordination is isolated to `@MainActor`, and on-device AI analysis executes asynchronously.
+```mermaid
+flowchart TD
+    Core["ChiefKitStudioCore"]
+    AST["ChiefKitAST"] --> Core
+    DS["ChiefKitDesignSystem"] --> Core
+    Sec["ChiefKitSecurity"] --> Core
+    BP["ChiefKitBlueprints"] --> Core
+    App["ChiefKitStudio (macOS App & CLI)"] --> Core
+    App --> AST
+    App --> DS
+    App --> Sec
+    App --> BP
+    Tests["ChiefKitStudioTests"] --> App
+```

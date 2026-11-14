@@ -13,6 +13,11 @@ extension Notification.Name {
     static let studioUndoCanvas = Notification.Name("studioUndoCanvas")
     static let studioRedoCanvas = Notification.Name("studioRedoCanvas")
     static let studioPinCurrentSnippet = Notification.Name("studioPinCurrentSnippet")
+    static let studioOpenASTLab = Notification.Name("studioOpenASTLab")
+    static let studioOpenComponentCatalog = Notification.Name("studioOpenComponentCatalog")
+    static let studioOpenSecurityVault = Notification.Name("studioOpenSecurityVault")
+    static let studioOpenPerformanceProfiler = Notification.Name("studioOpenPerformanceProfiler")
+    static let studioRunMasterSelfCheck = Notification.Name("studioRunMasterSelfCheck")
 }
 
 struct ContentView: View {
@@ -22,7 +27,7 @@ struct ContentView: View {
         ZStack {
             NavigationSplitView {
                 SidebarView(viewModel: viewModel)
-                    .navigationSplitViewColumnWidth(min: 225, ideal: 278, max: 350)
+                    .navigationSplitViewColumnWidth(min: 235, ideal: 292, max: 370)
             } detail: {
                 ZStack(alignment: .bottomTrailing) {
                     VStack(spacing: 0) {
@@ -97,6 +102,21 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .studioPinCurrentSnippet)) { _ in
             viewModel.pinCurrentSnippet()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .studioOpenASTLab)) { _ in
+            viewModel.select(.workbench(.astCompiler))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .studioOpenComponentCatalog)) { _ in
+            viewModel.select(.workbench(.componentCatalog64))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .studioOpenSecurityVault)) { _ in
+            viewModel.select(.workbench(.securityAndEphemeris))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .studioOpenPerformanceProfiler)) { _ in
+            viewModel.select(.workbench(.performanceProfiler))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .studioRunMasterSelfCheck)) { _ in
+            viewModel.runStudioSelfCheck()
         }
     }
 }

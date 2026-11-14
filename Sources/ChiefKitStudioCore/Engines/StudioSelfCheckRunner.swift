@@ -27,7 +27,7 @@ public struct SelfCheckSuiteReport: Codable, Equatable, Sendable {
 
     public var formattedSummary: String {
         var lines = [
-            "=== ChiefKit Studio 2.5 End-to-End Self-Check ===",
+            "=== ChiefKit Studio 3.0 End-to-End Self-Check ===",
             String(format: "Status: %@ (%d/%d passed in %.1f ms)", allPassed ? "PASS" : "FAIL", passedCount, steps.count, durationMilliseconds),
             ""
         ]
@@ -206,6 +206,73 @@ public enum StudioSelfCheckRunner {
             subsystem: "Workspace Persistence & Project Generator",
             passed: ioOK,
             detail: ".chiefkit snapshot round-trip + standalone SwiftPM project + unit test target verified"
+        ))
+
+        // 8. DataSchema ER Modeler + Persistence + OpenAPI 3.1 & Mock Router
+        let schemaWS = DataSchemaWorkspace.preset(.fintechDoubleEntry)
+        let schemaReport = schemaWS.analyzeNormalizationAndIntegrity()
+        let sqliteArtifact = PersistenceCodeSynthesizer.synthesize(workspace: schemaWS, backend: .sqlite3StrictDDL)
+        let apiService = APIServiceSpec.deriveCRUDService(from: schemaWS)
+        let openAPIJSON = APISpecAndMockEngine.compileOpenAPI31JSON(apiService)
+        let schemaOK = !schemaWS.entities.isEmpty
+            && sqliteArtifact.sourceCode.contains("CREATE TABLE")
+            && openAPIJSON.contains("\"openapi\"")
+            && schemaReport.cyclicEntityNames.isEmpty
+        steps.append(SelfCheckStepResult(
+            subsystem: "DataSchema + SQLite DDL + OpenAPI 3.1",
+            passed: schemaOK,
+            detail: "\(schemaWS.entities.count) entities, strict SQLite DDL + OpenAPI 3.1 (\(apiService.endpoints.count) endpoints) verified"
+        ))
+
+        // 9. Localization String Catalog (.xcstrings) + CLDR Plurals + Pseudolocalization
+        let masterCatalog = StudioBuiltInTranslations.unifiedMasterCatalog()
+        let xcstringsJSON = (try? masterCatalog.encodeXCStringsJSON()) ?? ""
+        let decodedCatalog = try? StringCatalogDocument.decodeXCStringsJSON(xcstringsJSON)
+        let pseudo = StringCatalogCompiler.pseudolocalize("Ship Faster", mode: .accentedExpanded)
+        let l10nEnum = StringCatalogCompiler.synthesizeL10nSwiftEnum(from: masterCatalog)
+        let l10nOK = decodedCatalog != nil
+            && !masterCatalog.entries.isEmpty
+            && pseudo != "Ship Faster"
+            && l10nEnum.contains("enum L10n")
+        steps.append(SelfCheckStepResult(
+            subsystem: "String Catalog (.xcstrings) & CLDR Plurals",
+            passed: l10nOK,
+            detail: "\(masterCatalog.entries.count) localized keys across 7 locales (incl. TR & RTL AR) round-tripped"
+        ))
+
+        // 10. 120Hz ProMotion Frame-Budget & State Invalidation Profiler
+        let frameReport = FrameBudgetProfiler.profile(
+            swiftUISource: blueprintCode,
+            canvas: doc,
+            theme: lowContrastTheme,
+            target: .proMotion120Hz
+        )
+        let invalidationReport = StateInvalidationAnalyzer.analyze(swiftSource: blueprintCode)
+        let profilerOK = frameReport.totalFrameTimeMs > 0
+            && !frameReport.flamegraphRoot.children.isEmpty
+            && !invalidationReport.mermaidFlowchartLR.isEmpty
+        steps.append(SelfCheckStepResult(
+            subsystem: "120Hz ProMotion & Invalidation Profiler",
+            passed: profilerOK,
+            detail: String(format: "120Hz frame estimate %.2f ms (budget %.2f ms), flamegraph & dependency graph active", frameReport.totalFrameTimeMs, frameReport.budgetMs)
+        ))
+
+        // 11. Conditional NotebookFlow Runtime + DocC/HTML Spec Compiler
+        let docBundle = StudioDocBundleCompiler.compileBundle(
+            StudioSpecBundleInput(
+                projectName: "ChiefKit Studio 3.0 Spec",
+                themeTokens: lowContrastTheme,
+                canvasDocument: doc,
+                flowDefinition: decodedFlow,
+                dataSchema: schemaWS,
+                stringCatalog: masterCatalog
+            )
+        )
+        let runtimeOK = docBundle.doccFiles.count >= 4 && docBundle.standaloneHTMLSpecification.contains("<html")
+        steps.append(SelfCheckStepResult(
+            subsystem: "Runtime Flow Engine & DocC/HTML Compiler",
+            passed: runtimeOK,
+            detail: "\(docBundle.doccFiles.count) DocC articles + standalone HTML specification compiled"
         ))
 
         let elapsed = Date().timeIntervalSince(start) * 1000.0

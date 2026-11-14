@@ -1,4 +1,5 @@
 #if canImport(SwiftUI) && canImport(AppKit)
+import ChiefKitBlueprints
 import ChiefKitStudioCore
 import SwiftUI
 
@@ -12,10 +13,10 @@ struct SidebarView: View {
                     ChiefKitLogoView(size: 34, cornerRadius: 8)
 
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("ChiefKit Studio")
+                        Text("ChiefKit Studio 3.0")
                             .font(.headline.weight(.bold))
                             .lineLimit(1)
-                        Text("Playground · AI · Blueprints")
+                        Text("Workbenches · AST · 28 Blueprints")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -40,7 +41,7 @@ struct SidebarView: View {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
                         .font(.caption)
-                    TextField("Search packages, blueprints, APIs…", text: $viewModel.searchText)
+                    TextField("Search workbenches, 28 blueprints, APIs…", text: $viewModel.searchText)
                         .textFieldStyle(.plain)
                         .font(.callout)
                     if !viewModel.searchText.isEmpty {
@@ -107,8 +108,25 @@ struct SidebarView: View {
                     }
                 }
 
+                if !viewModel.filteredWorkbenches.isEmpty {
+                    Section("Studio 3.0 Workbenches (\(viewModel.filteredWorkbenches.count))") {
+                        ForEach(viewModel.filteredWorkbenches) { wb in
+                            SidebarRow(
+                                title: wb.title,
+                                subtitle: wb.subtitle,
+                                badge: "3.0 Lab",
+                                systemImage: wb.symbolName,
+                                accent: viewModel.themeTokens.primary.swiftUIColor,
+                                isSelected: viewModel.selection == .workbench(wb)
+                            ) {
+                                viewModel.select(.workbench(wb))
+                            }
+                        }
+                    }
+                }
+
                 if !viewModel.filteredPackages.isEmpty {
-                    Section("Core Packages") {
+                    Section("Core Packages (\(viewModel.filteredPackages.count))") {
                         ForEach(viewModel.filteredPackages) { package in
                             SidebarRow(
                                 title: package.title,
@@ -124,8 +142,25 @@ struct SidebarView: View {
                     }
                 }
 
+                if !viewModel.filteredEnterpriseBlueprints.isEmpty {
+                    Section("Enterprise Blueprints (\(viewModel.filteredEnterpriseBlueprints.count))") {
+                        ForEach(viewModel.filteredEnterpriseBlueprints) { spec in
+                            SidebarRow(
+                                title: spec.title,
+                                subtitle: "\(spec.vertical.title) — \(spec.subtitle)",
+                                badge: "14-File",
+                                systemImage: spec.sfSymbol,
+                                accent: viewModel.themeTokens.primary.swiftUIColor,
+                                isSelected: viewModel.selection == .enterpriseBlueprint(spec.id.rawValue)
+                            ) {
+                                viewModel.select(.enterpriseBlueprint(spec.id.rawValue))
+                            }
+                        }
+                    }
+                }
+
                 if !viewModel.filteredBlueprints.isEmpty {
-                    Section("Full-Stack Blueprints (\(viewModel.filteredBlueprints.count))") {
+                    Section("Classic Full-Stack Blueprints (\(viewModel.filteredBlueprints.count))") {
                         ForEach(viewModel.filteredBlueprints) { blueprint in
                             SidebarRow(
                                 title: blueprint.title,
